@@ -119,7 +119,7 @@ WP-CLI: `wp consulta-leve diagnostico`, `wp consulta-leve indices listar`,
 | `consulta-leve/` | o plugin (é esta pasta que vai no zip) |
 | `docs/` | contrato, atualizador e releases |
 | `tests/` | contratos Node e testes PHP sem WordPress |
-| `tools/` | release assinada, chave e o WordPress local central |
+| `tools/` | release assinada, chave, proteções do repositório e o WordPress local central |
 
 ## Testes e WordPress local
 

@@ -50,5 +50,9 @@ pelas versões assinadas (ver `docs/ATUALIZADOR.md`).
   máquina de quem publica, protegida por senha (`docs/RELEASE.md`).
 - A atualização automática só instala versão publicada há 48 h ou mais.
 - O CI roda com permissão só de leitura e ações fixadas por commit.
+- Proteções do repositório (Dependabot, varredura de segredos com bloqueio
+  no push, relato privado, `main` sem force-push, tags `v*` imutáveis)
+  aplicadas por `node tools/protecoes.mjs aplicar`; as que exigem
+  repositório público ficam pendentes até a abertura.
 - Commits com e-mail noreply; nenhum segredo no repositório (`.gitignore`
   recusa `.env`, `*.pem`, `*.key` e credenciais locais).
