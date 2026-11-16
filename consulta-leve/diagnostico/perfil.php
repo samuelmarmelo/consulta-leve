@@ -252,7 +252,14 @@ if ( ! function_exists( 'consulta_leve_perfil_modo_pedido' ) ) {
 			return null;
 		}
 
+		// SQLite (Playground) não tem o EXPLAIN do MySQL: o driver só gravaria erro no log.
+		if ( ( defined( 'DB_ENGINE' ) && 'sqlite' === DB_ENGINE ) || ( class_exists( 'WP_SQLite_DB', false ) && $wpdb instanceof \WP_SQLite_DB ) ) {
+			return null;
+		}
+
+		$antes  = $wpdb->suppress_errors( true );
 		$linhas = $wpdb->get_results( 'EXPLAIN ' . $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- SQL já executado nesta requisição; só SELECT.
+		$wpdb->suppress_errors( $antes );
 		if ( ! is_array( $linhas ) ) {
 			return null;
 		}
