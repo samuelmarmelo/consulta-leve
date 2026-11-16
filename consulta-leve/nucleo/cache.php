@@ -14,8 +14,8 @@
 
 defined( 'ABSPATH' ) || exit;
 
-/** Opção com as versões dos grupos (autoload desligado). */
-const CONSULTA_LEVE_OPCAO_VERSOES = 'consulta_leve_cache_versoes';
+/** Prefixo das opções de versão, uma por grupo (autoload desligado). */
+const CONSULTA_LEVE_OPCAO_VERSAO = 'consulta_leve_cv_';
 
 /** Grupo do cache de objetos. */
 const CONSULTA_LEVE_GRUPO_CACHE = 'consulta_leve';
@@ -40,26 +40,27 @@ if ( ! function_exists( 'consulta_leve_lembrar' ) ) {
 	}
 
 	/**
-	 * Versões de todos os grupos.
-	 *
-	 * @return array<string,string>
-	 */
-	function consulta_leve_cache_versoes(): array {
-		$versoes = get_option( CONSULTA_LEVE_OPCAO_VERSOES, array() );
-		return is_array( $versoes ) ? $versoes : array();
-	}
-
-	/**
-	 * Versão de um grupo ('0' enquanto ninguém tocou).
+	 * Versão de um grupo ('0' enquanto ninguém tocou). Uma opção por grupo:
+	 * duas requisições que invalidam grupos diferentes não se sobrescrevem.
 	 *
 	 * @param string $grupo Grupo.
 	 * @return string
 	 */
 	function consulta_leve_cache_versao( string $grupo ): string {
-		$versoes = consulta_leve_cache_versoes();
-		$grupo   = consulta_leve_cache_grupo( $grupo );
+		return (string) get_option( CONSULTA_LEVE_OPCAO_VERSAO . consulta_leve_cache_grupo( $grupo ), '0' );
+	}
 
-		return isset( $versoes[ $grupo ] ) ? (string) $versoes[ $grupo ] : '0';
+	/**
+	 * Grava a versão nova de um grupo.
+	 *
+	 * @param string $grupo Grupo saneado.
+	 * @return string Versão nova.
+	 */
+	function consulta_leve_cache_nova_versao( string $grupo ): string {
+		$nova = str_replace( '.', '', sprintf( '%.4F', microtime( true ) ) ) . wp_rand( 100, 999 );
+		update_option( CONSULTA_LEVE_OPCAO_VERSAO . $grupo, $nova, false );
+
+		return $nova;
 	}
 
 	/**
@@ -69,12 +70,8 @@ if ( ! function_exists( 'consulta_leve_lembrar' ) ) {
 	 * @return string Versão nova.
 	 */
 	function consulta_leve_cache_tocar( string $grupo ): string {
-		$versoes = consulta_leve_cache_versoes();
-		$grupo   = consulta_leve_cache_grupo( $grupo );
-		$nova    = str_replace( '.', '', sprintf( '%.4F', microtime( true ) ) );
-
-		$versoes[ $grupo ] = $nova;
-		update_option( CONSULTA_LEVE_OPCAO_VERSOES, $versoes, false );
+		$grupo = consulta_leve_cache_grupo( $grupo );
+		$nova  = consulta_leve_cache_nova_versao( $grupo );
 
 		/**
 		 * Um grupo do cache da Consulta Leve foi invalidado.
@@ -149,12 +146,9 @@ if ( ! function_exists( 'consulta_leve_lembrar' ) ) {
 			return;
 		}
 
-		$versoes = consulta_leve_cache_versoes();
-		$nova    = str_replace( '.', '', sprintf( '%.4F', microtime( true ) ) );
 		foreach ( $mudadas as $dep ) {
-			$versoes[ 'dep_' . consulta_leve_cache_grupo( $dep ) ] = $nova;
+			consulta_leve_cache_nova_versao( 'dep_' . consulta_leve_cache_grupo( $dep ) );
 		}
-		update_option( CONSULTA_LEVE_OPCAO_VERSOES, $versoes, false );
 		$GLOBALS['consulta_leve_deps_mudadas'] = array();
 	}
 
