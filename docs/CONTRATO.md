@@ -273,8 +273,10 @@ Fila por requisição em `save_post`, `deleted_post`, `trashed_post`,
 `untrashed_post`, `set_object_terms`, `added/updated/deleted_post_meta` (só
 chaves de `indice_metas`), gravada no `shutdown` com `REPLACE INTO`: até 50
 posts na própria requisição, o resto em `consulta_leve_busca_pendentes`,
-gravado pelo cron em lotes de 200. Mais de 5000 pendentes vira
-reconstrução. Rascunho, privado e agendado só voltam em
+gravado pelo cron em lotes de 200. Ler e regravar a lista de pendentes
+fica sob trava curta (`busca_pendentes_lista`); o cron relê a lista depois
+do lote e tira só os IDs gravados. Mais de 5000 pendentes, ou a trava
+ocupada por mais de meio segundo, vira reconstrução. Rascunho, privado e agendado só voltam em
 `consulta_leve_busca_ids` para quem tem `edit_others_posts`. Post que saiu dos tipos ou foi apagado sai
 da tabela (é cache: o post continua a fonte da verdade). Cada gravação
 muda a versão do grupo de cache `busca`.
@@ -282,7 +284,11 @@ muda a versão do grupo de cache `busca`.
 ### 7.4 Reconstrução
 
 Cron em lotes de 200 por cursor de ID, com geração (cadeia velha para
-sozinha) e trava; lote carrega posts e metas em cache antes. No fim, linhas
+sozinha) e trava; lote carrega posts e metas em cache antes. O lote relê o
+estado dentro da trava, e toda gravação do estado (inclusive o início de
+uma reconstrução, que sempre gera um número maior que o anterior) passa
+pela trava curta `busca_estado` e confere a geração: lote velho não
+ressuscita estado nem apaga reconstrução nova. No fim, linhas
 órfãs saem com `LEFT JOIN ... IS NULL`. Conferência diária barata:
 `COUNT(*)` e `MAX(post_modified_gmt)` contra a tabela; só reconstrói se
 diferente. Painel tem o botão Reconstruir; WP-CLI
@@ -322,7 +328,9 @@ Em `pre_get_posts` (prioridade 5), consulta com `s` no site (não painel):
   agrupado por /64. IP = `REMOTE_ADDR`; atrás de CDN ou proxy, o site deve
   informar o IP real pelo filtro `consulta_leve_ip`. Sem cache de objetos
   externo, um transient por balde e minuto (até 1000 pessoas; as demais
-  dividem um contador com dez vezes o limite).
+  dividem um contador com dez vezes o limite). Nesse caso o limite é
+  aproximado: pedidos simultâneos podem contar uma vez só (folga do tamanho
+  da rajada); com cache externo o contador é atômico e o limite é exato.
 
 ### 8.2 Componente de busca rápida
 

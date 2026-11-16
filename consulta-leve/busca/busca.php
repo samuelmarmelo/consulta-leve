@@ -93,6 +93,11 @@ if ( ! function_exists( 'consulta_leve_busca_termo_limpo' ) ) {
 	 * pessoas; acima disso as novas dividem um contador comum com dez vezes o
 	 * limite. Ataque com muitos IPs não enche wp_options.
 	 *
+	 * Sem cache externo o limite é aproximado: o transient é lido e regravado
+	 * sem trava (uma trava por pedido custaria duas escritas a mais no banco),
+	 * então pedidos simultâneos podem contar uma vez só. A folga é do tamanho
+	 * da rajada simultânea; para limite exato, use cache de objetos externo.
+	 *
 	 * @param string $balde      Nome do limite (busca, rest, rest_global).
 	 * @param int    $por_minuto Pedidos aceitos por minuto (0 = sem limite).
 	 * @param bool   $global     Um contador só para todo mundo.

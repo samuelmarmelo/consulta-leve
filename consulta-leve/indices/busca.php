@@ -305,25 +305,62 @@ KEY modificado (modificado)
 	}
 
 	/**
-	 * Guarda posts para o cron gravar depois.
+	 * Trava curta para ler e regravar uma opção da busca. A trava dura
+	 * microssegundos; espera até meio segundo antes de desistir.
+	 *
+	 * @param string $nome Nome da trava.
+	 * @return string Dono ou '' se não conseguiu.
+	 */
+	function consulta_leve_busca_travar_curto( string $nome ): string {
+		for ( $i = 0; $i < 20; $i++ ) {
+			$dono = consulta_leve_travar( $nome, 10 );
+			if ( '' !== $dono ) {
+				return $dono;
+			}
+			usleep( 25000 );
+		}
+
+		return '';
+	}
+
+	/**
+	 * Guarda posts para o cron gravar depois. Ler e regravar a lista fica sob
+	 * trava: duas requisições ao mesmo tempo não perdem IDs uma da outra.
 	 *
 	 * @param int[] $ids Posts.
 	 * @return void
 	 */
 	function consulta_leve_busca_adiar( array $ids ): void {
-		$pendentes = get_option( 'consulta_leve_busca_pendentes', array() );
-		$pendentes = is_array( $pendentes ) ? $pendentes : array();
-		foreach ( $ids as $id ) {
-			$pendentes[ (int) $id ] = true;
-		}
-
-		if ( count( $pendentes ) > CONSULTA_LEVE_BUSCA_FILA_MAX ) {
-			delete_option( 'consulta_leve_busca_pendentes' );
+		$dono = consulta_leve_busca_travar_curto( 'busca_pendentes_lista' );
+		if ( '' === $dono ) {
+			// Sem a trava, somar perderia IDs: a reconstrução cobre todos.
+			do_action( 'consulta_leve_falha', 'busca-adiar', new \RuntimeException( 'trava da lista ocupada' ) );
 			consulta_leve_busca_reconstruir_iniciar();
 			return;
 		}
 
-		update_option( 'consulta_leve_busca_pendentes', $pendentes, false );
+		$reconstruir = false;
+		try {
+			$pendentes = get_option( 'consulta_leve_busca_pendentes', array() );
+			$pendentes = is_array( $pendentes ) ? $pendentes : array();
+			foreach ( $ids as $id ) {
+				$pendentes[ (int) $id ] = true;
+			}
+
+			if ( count( $pendentes ) > CONSULTA_LEVE_BUSCA_FILA_MAX ) {
+				delete_option( 'consulta_leve_busca_pendentes' );
+				$reconstruir = true;
+			} else {
+				update_option( 'consulta_leve_busca_pendentes', $pendentes, false );
+			}
+		} finally {
+			consulta_leve_liberar( 'busca_pendentes_lista', $dono );
+		}
+
+		if ( $reconstruir ) {
+			consulta_leve_busca_reconstruir_iniciar();
+			return;
+		}
 		if ( ! wp_next_scheduled( CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES ) ) {
 			wp_schedule_single_event( time() + 5, CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES );
 		}
@@ -331,6 +368,8 @@ KEY modificado (modificado)
 
 	/**
 	 * Cron: grava até 200 pendentes por vez e se reagenda enquanto houver.
+	 * Depois de gravar, relê a lista e tira só os IDs gravados: o que outra
+	 * requisição adiou durante o lote continua lá.
 	 *
 	 * @return void
 	 */
@@ -344,16 +383,64 @@ KEY modificado (modificado)
 			$pendentes = get_option( 'consulta_leve_busca_pendentes', array() );
 			$pendentes = is_array( $pendentes ) ? array_keys( $pendentes ) : array();
 			$lote      = array_slice( $pendentes, 0, 200 );
-			if ( $lote ) {
-				consulta_leve_busca_gravar( $lote );
+			if ( ! $lote ) {
+				return;
 			}
-			$resto = array_slice( $pendentes, 200 );
-			update_option( 'consulta_leve_busca_pendentes', array_fill_keys( $resto, true ), false );
-			if ( $resto ) {
+			consulta_leve_busca_gravar( $lote );
+
+			$lista = consulta_leve_busca_travar_curto( 'busca_pendentes_lista' );
+			if ( '' === $lista ) {
+				// Regravar o lote é inofensivo: tenta de novo em 1 minuto.
+				wp_schedule_single_event( time() + 60, CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES );
+				return;
+			}
+			try {
+				$atual = get_option( 'consulta_leve_busca_pendentes', array() );
+				$atual = is_array( $atual ) ? $atual : array();
+				foreach ( $lote as $id ) {
+					unset( $atual[ (int) $id ] );
+				}
+				update_option( 'consulta_leve_busca_pendentes', $atual, false );
+			} finally {
+				consulta_leve_liberar( 'busca_pendentes_lista', $lista );
+			}
+
+			if ( $atual ) {
 				wp_schedule_single_event( time() + 5, CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES );
 			}
 		} finally {
 			consulta_leve_liberar( 'busca_pendentes', $dono );
+		}
+	}
+
+	/**
+	 * Grava ou apaga o estado da reconstrução só se a geração ainda for a
+	 * mesma (sob trava curta): lote velho não ressuscita estado nem apaga
+	 * uma reconstrução nova.
+	 *
+	 * @param int        $geracao Geração do lote.
+	 * @param array|null $estado  Estado novo, ou null para encerrar.
+	 * @return bool Gravou?
+	 */
+	function consulta_leve_busca_estado_salvar( int $geracao, ?array $estado ): bool {
+		$dono = consulta_leve_busca_travar_curto( 'busca_estado' );
+		if ( '' === $dono ) {
+			return false;
+		}
+
+		try {
+			$atual = get_option( 'consulta_leve_busca_reconstrucao', array() );
+			if ( empty( $atual['geracao'] ) || (int) $atual['geracao'] !== $geracao ) {
+				return false;
+			}
+			if ( null === $estado ) {
+				delete_option( 'consulta_leve_busca_reconstrucao' );
+			} else {
+				update_option( 'consulta_leve_busca_reconstrucao', $estado, false );
+			}
+			return true;
+		} finally {
+			consulta_leve_liberar( 'busca_estado', $dono );
 		}
 	}
 
@@ -363,18 +450,28 @@ KEY modificado (modificado)
 	 * @return int Geração nova.
 	 */
 	function consulta_leve_busca_reconstruir_iniciar(): int {
-		$geracao = time();
-		update_option(
-			'consulta_leve_busca_reconstrucao',
-			array(
-				'geracao' => $geracao,
-				'cursor'  => 0,
-				'feitos'  => 0,
-				'inicio'  => $geracao,
-				'agora'   => $geracao,
-			),
-			false
-		);
+		// Mesma trava do estado: um lote velho não grava por cima da geração
+		// nova. Sem a trava em meio segundo, grava assim mesmo (a nova vence).
+		$dono = consulta_leve_busca_travar_curto( 'busca_estado' );
+		try {
+			$antes   = get_option( 'consulta_leve_busca_reconstrucao', array() );
+			$geracao = max( time(), (int) ( $antes['geracao'] ?? 0 ) + 1 );
+			update_option(
+				'consulta_leve_busca_reconstrucao',
+				array(
+					'geracao' => $geracao,
+					'cursor'  => 0,
+					'feitos'  => 0,
+					'inicio'  => time(),
+					'agora'   => time(),
+				),
+				false
+			);
+		} finally {
+			if ( '' !== $dono ) {
+				consulta_leve_liberar( 'busca_estado', $dono );
+			}
+		}
 		wp_schedule_single_event( time(), CONSULTA_LEVE_BUSCA_GANCHO_LOTE, array( $geracao, 0 ) );
 		consulta_leve_registrar( 'busca_reconstruir', (string) $geracao, 'iniciada' );
 
@@ -403,6 +500,13 @@ KEY modificado (modificado)
 		}
 
 		try {
+			// Relê dentro da trava: outro lote pode ter terminado ou uma
+			// reconstrução nova pode ter começado enquanto esperávamos.
+			$estado = get_option( 'consulta_leve_busca_reconstrucao', array() );
+			if ( empty( $estado['geracao'] ) || (int) $estado['geracao'] !== (int) $geracao ) {
+				return is_array( $estado ) ? $estado : array();
+			}
+
 			if ( (int) get_option( 'consulta_leve_busca_esquema', 0 ) !== CONSULTA_LEVE_BUSCA_ESQUEMA && ! consulta_leve_busca_instalar() ) {
 				return $estado;
 			}
@@ -425,15 +529,19 @@ KEY modificado (modificado)
 
 			if ( '' !== $feito['erro'] ) {
 				$estado['agora'] = time();
-				update_option( 'consulta_leve_busca_reconstrucao', $estado, false );
+				if ( ! consulta_leve_busca_estado_salvar( (int) $geracao, $estado ) ) {
+					return $estado;
+				}
 				wp_schedule_single_event( time() + 60, CONSULTA_LEVE_BUSCA_GANCHO_LOTE, array( (int) $geracao, (int) $estado['cursor'] ) );
 				return $estado;
 			}
 
 			if ( $feito['fim'] ) {
+				if ( ! consulta_leve_busca_estado_salvar( (int) $geracao, null ) ) {
+					return $estado;
+				}
 				consulta_leve_busca_limpar_orfas();
 				update_option( 'consulta_leve_busca_construida', time(), false );
-				delete_option( 'consulta_leve_busca_reconstrucao' );
 				consulta_leve_cache_tocar( 'busca' );
 				consulta_leve_registrar( 'busca_reconstruir', (string) $geracao, 'ok_' . (int) $estado['feitos'] );
 				$estado['geracao'] = 0;
@@ -441,7 +549,9 @@ KEY modificado (modificado)
 			}
 
 			$estado['agora'] = time();
-			update_option( 'consulta_leve_busca_reconstrucao', $estado, false );
+			if ( ! consulta_leve_busca_estado_salvar( (int) $geracao, $estado ) ) {
+				return $estado;
+			}
 			wp_schedule_single_event( time() + 5, CONSULTA_LEVE_BUSCA_GANCHO_LOTE, array( (int) $geracao, (int) $estado['cursor'] ) );
 		} finally {
 			consulta_leve_liberar( 'busca_lote', $dono );
