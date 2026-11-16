@@ -51,6 +51,7 @@ if ( ! function_exists( 'consulta_leve_modulos' ) ) {
 			'nucleo/coexistencia.php',
 			'nucleo/trava.php',
 			'nucleo/cache.php',
+			'nucleo/registro.php',
 			'diagnostico/perfil.php',
 			'consultas/argumentos.php',
 			'consultas/primar.php',
