@@ -236,8 +236,9 @@ if ( ! function_exists( 'consulta_leve_indices_candidatos' ) ) {
 			$tabela = consulta_leve_indices_tabela( $candidatos[ $id ]['tabela'] );
 			$antes  = $wpdb->suppress_errors( true );
 			$feito  = $wpdb->query( consulta_leve_indices_sql_criar( $candidatos[ $id ], $tabela, true ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- nomes de tabela, índice e colunas da lista fechada.
-			if ( false === $feito ) {
-				// Banco que não aceita criação online: tenta do jeito comum.
+			// Só repete sem as cláusulas online se o banco recusou as cláusulas;
+			// qualquer outro erro (tempo de trava, espaço) para aqui, sem DDL bloqueante.
+			if ( false === $feito && 1 === preg_match( '/ALGORITHM|LOCK=NONE/i', (string) $wpdb->last_error ) ) {
 				$feito = $wpdb->query( consulta_leve_indices_sql_criar( $candidatos[ $id ], $tabela, false ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- idem.
 			}
 			$wpdb->suppress_errors( $antes );

@@ -110,7 +110,7 @@ confere( 'modificado em GMT', $linhas[1]['modificado'], '2026-11-15 10:00:00' );
 $sql = implode( "\n", $GLOBALS['cl_t']['consultas'] );
 confere( 'fora dos tipos sai da tabela', false !== strpos( $sql, 'DELETE wp_consulta_leve_busca {"post_id":2}' ), true );
 confere( 'post apagado sai da tabela', false !== strpos( $sql, 'DELETE wp_consulta_leve_busca {"post_id":99}' ), true );
-confere( 'gravar invalida o cache da busca', isset( get_option( 'consulta_leve_cache_versoes' )['busca'] ), true );
+confere( 'gravar invalida o cache da busca', false !== get_option( 'consulta_leve_cv_busca' ), true );
 
 /* Fila ---------------------------------------------------------------------- */
 
@@ -170,6 +170,30 @@ confere( 'sem FULLTEXT vai para o LIKE', $r['via'], 'like' );
 confere( 'status fora da lista ignorado', false !== strpos( $GLOBALS['cl_t']['ultima_busca'], "post_status IN ('publish')" ), true );
 confere( 'termo vazio não consulta', consulta_leve_busca_ids( '+ - *' )['via'], 'nenhuma' );
 confere( 'tipo não indexado não consulta', consulta_leve_busca_ids( 'coração', array( 'tipos' => array( 'page' ) ) )['via'], 'nenhuma' );
+
+/* Status protegido ---------------------------------------------------------- */
+
+update_option( 'consulta_leve_busca_fulltext', '1' );
+consulta_leve_busca_ids( 'protegido', array( 'status' => array( 'publish', 'draft', 'private' ) ) );
+confere( 'sem permissão: só publicados', false !== strpos( $GLOBALS['cl_t']['ultima_busca'], "post_status IN ('publish')" ), true );
+$GLOBALS['cl_t']['pode']['edit_others_posts'] = true;
+consulta_leve_busca_ids( 'protegido', array( 'status' => array( 'publish', 'draft' ) ) );
+confere( 'com permissão: rascunhos também', false !== strpos( $GLOBALS['cl_t']['ultima_busca'], "post_status IN ('publish','draft')" ), true );
+$GLOBALS['cl_t']['pode'] = array();
+
+/* Pendentes ----------------------------------------------------------------- */
+
+for ( $i = 100; $i < 160; $i++ ) {
+	$GLOBALS['cl_t_posts'][ $i ] = cl_post( $i );
+	consulta_leve_busca_enfileirar( $i );
+}
+$GLOBALS['cl_t']['agendados'] = array();
+consulta_leve_busca_processar_fila();
+confere( 'dez ficam para o cron', count( get_option( 'consulta_leve_busca_pendentes' ) ), 10 );
+confere( 'cron dos pendentes agendado', $GLOBALS['cl_t']['agendados'][0][0], CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES );
+consulta_leve_busca_gravar_pendentes();
+confere( 'pendentes gravados', get_option( 'consulta_leve_busca_pendentes' ), array() );
+confere( 'último pendente na tabela', isset( $GLOBALS['cl_t']['linhas']['wp_consulta_leve_busca'][159] ), true );
 
 /* Busca do núcleo ----------------------------------------------------------- */
 

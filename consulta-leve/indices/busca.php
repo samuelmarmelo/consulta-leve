@@ -18,8 +18,14 @@ defined( 'ABSPATH' ) || exit;
 /** Versão do esquema da tabela (subiu, reinstala). */
 const CONSULTA_LEVE_BUSCA_ESQUEMA = 1;
 
-/** Fila maior que isto vira reconstrução. */
-const CONSULTA_LEVE_BUSCA_FILA_MAX = 500;
+/** Posts gravados na própria requisição; o resto vai para o cron. */
+const CONSULTA_LEVE_BUSCA_FILA_AGORA = 50;
+
+/** Pendentes acima disto viram reconstrução. */
+const CONSULTA_LEVE_BUSCA_FILA_MAX = 5000;
+
+/** Gancho dos pendentes. */
+const CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES = 'consulta_leve_busca_pendentes';
 
 /** Caracteres de texto guardados por post. */
 const CONSULTA_LEVE_BUSCA_TEXTO_MAX = 200000;
@@ -273,7 +279,9 @@ KEY modificado (modificado)
 	}
 
 	/**
-	 * Grava a fila. Fila grande vira reconstrução em segundo plano.
+	 * Grava a fila: até 50 posts na própria requisição (o salvar do editor
+	 * não espera mais que isso); o resto entra nos pendentes, gravados pelo
+	 * cron em lotes. Pendentes demais viram reconstrução.
 	 *
 	 * @return void
 	 */
@@ -285,13 +293,67 @@ KEY modificado (modificado)
 		}
 
 		try {
-			if ( count( $fila ) > CONSULTA_LEVE_BUSCA_FILA_MAX ) {
-				consulta_leve_busca_reconstruir_iniciar();
-				return;
+			$agora = array_slice( $fila, 0, CONSULTA_LEVE_BUSCA_FILA_AGORA );
+			$resto = array_slice( $fila, CONSULTA_LEVE_BUSCA_FILA_AGORA );
+			consulta_leve_busca_gravar( $agora );
+			if ( $resto ) {
+				consulta_leve_busca_adiar( $resto );
 			}
-			consulta_leve_busca_gravar( $fila );
 		} catch ( \Throwable $erro ) {
 			do_action( 'consulta_leve_falha', 'busca-fila', $erro );
+		}
+	}
+
+	/**
+	 * Guarda posts para o cron gravar depois.
+	 *
+	 * @param int[] $ids Posts.
+	 * @return void
+	 */
+	function consulta_leve_busca_adiar( array $ids ): void {
+		$pendentes = get_option( 'consulta_leve_busca_pendentes', array() );
+		$pendentes = is_array( $pendentes ) ? $pendentes : array();
+		foreach ( $ids as $id ) {
+			$pendentes[ (int) $id ] = true;
+		}
+
+		if ( count( $pendentes ) > CONSULTA_LEVE_BUSCA_FILA_MAX ) {
+			delete_option( 'consulta_leve_busca_pendentes' );
+			consulta_leve_busca_reconstruir_iniciar();
+			return;
+		}
+
+		update_option( 'consulta_leve_busca_pendentes', $pendentes, false );
+		if ( ! wp_next_scheduled( CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES ) ) {
+			wp_schedule_single_event( time() + 5, CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES );
+		}
+	}
+
+	/**
+	 * Cron: grava até 200 pendentes por vez e se reagenda enquanto houver.
+	 *
+	 * @return void
+	 */
+	function consulta_leve_busca_gravar_pendentes(): void {
+		$dono = consulta_leve_travar( 'busca_pendentes', 300 );
+		if ( '' === $dono ) {
+			return;
+		}
+
+		try {
+			$pendentes = get_option( 'consulta_leve_busca_pendentes', array() );
+			$pendentes = is_array( $pendentes ) ? array_keys( $pendentes ) : array();
+			$lote      = array_slice( $pendentes, 0, 200 );
+			if ( $lote ) {
+				consulta_leve_busca_gravar( $lote );
+			}
+			$resto = array_slice( $pendentes, 200 );
+			update_option( 'consulta_leve_busca_pendentes', array_fill_keys( $resto, true ), false );
+			if ( $resto ) {
+				wp_schedule_single_event( time() + 5, CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES );
+			}
+		} finally {
+			consulta_leve_liberar( 'busca_pendentes', $dono );
 		}
 	}
 
@@ -309,6 +371,7 @@ KEY modificado (modificado)
 				'cursor'  => 0,
 				'feitos'  => 0,
 				'inicio'  => $geracao,
+				'agora'   => $geracao,
 			),
 			false
 		);
@@ -361,6 +424,7 @@ KEY modificado (modificado)
 			$estado['feitos'] += $feito['feitos'];
 
 			if ( '' !== $feito['erro'] ) {
+				$estado['agora'] = time();
 				update_option( 'consulta_leve_busca_reconstrucao', $estado, false );
 				wp_schedule_single_event( time() + 60, CONSULTA_LEVE_BUSCA_GANCHO_LOTE, array( (int) $geracao, (int) $estado['cursor'] ) );
 				return $estado;
@@ -376,6 +440,7 @@ KEY modificado (modificado)
 				return $estado;
 			}
 
+			$estado['agora'] = time();
 			update_option( 'consulta_leve_busca_reconstrucao', $estado, false );
 			wp_schedule_single_event( time() + 5, CONSULTA_LEVE_BUSCA_GANCHO_LOTE, array( (int) $geracao, (int) $estado['cursor'] ) );
 		} finally {
@@ -490,6 +555,11 @@ KEY modificado (modificado)
 		$indexados = consulta_leve_busca_tipos();
 		$tipos     = isset( $o['tipos'] ) ? array_values( array_intersect( consulta_leve_lotes_lista( $o['tipos'] ), $indexados ) ) : $indexados;
 		$status    = array_values( array_intersect( consulta_leve_lotes_lista( $o['status'] ?? 'publish' ), consulta_leve_busca_status_guardados() ) );
+		// Rascunho, privado e agendado só para quem edita posts dos outros:
+		// tema que repassar entrada do visitante não vaza conteúdo não publicado.
+		if ( array_diff( $status, array( 'publish' ) ) && ! current_user_can( 'edit_others_posts' ) ) {
+			$status = array_values( array_intersect( $status, array( 'publish' ) ) );
+		}
 		$por       = max( 1, min( 500, (int) ( $o['por_pagina'] ?? 20 ) ) );
 		$ordem     = ( $o['ordem'] ?? 'data' ) === 'relevancia' ? 'relevancia' : 'data';
 		$cursor    = 'data' === $ordem && isset( $o['cursor'] ) ? (string) $o['cursor'] : '';
@@ -669,6 +739,7 @@ KEY modificado (modificado)
 
 		add_action( CONSULTA_LEVE_BUSCA_GANCHO_LOTE, 'consulta_leve_busca_lote', 10, 2 );
 		add_action( CONSULTA_LEVE_BUSCA_GANCHO_DIARIO, 'consulta_leve_busca_conferir' );
+		add_action( CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES, 'consulta_leve_busca_gravar_pendentes' );
 		add_filter( 'posts_search', 'consulta_leve_busca_no_nucleo', 20, 2 );
 
 		// Painel: instala, começa a primeira construção e garante a conferência diária.
@@ -687,8 +758,16 @@ KEY modificado (modificado)
 						}
 						consulta_leve_liberar( 'busca_instalar', $dono );
 					}
-				} elseif ( 'construindo' === $estado && ! get_option( 'consulta_leve_busca_reconstrucao', array() ) ) {
-					consulta_leve_busca_reconstruir_iniciar();
+				} elseif ( 'construindo' === $estado ) {
+					$reconstrucao = get_option( 'consulta_leve_busca_reconstrucao', array() );
+					if ( empty( $reconstrucao['geracao'] ) ) {
+						consulta_leve_busca_reconstruir_iniciar();
+					} elseif ( time() - (int) ( $reconstrucao['agora'] ?? 0 ) > 600 ) {
+						// Cadeia parada há 10 min (cron perdido, tabela desligada no meio): retoma do cursor.
+						$reconstrucao['agora'] = time();
+						update_option( 'consulta_leve_busca_reconstrucao', $reconstrucao, false );
+						wp_schedule_single_event( time(), CONSULTA_LEVE_BUSCA_GANCHO_LOTE, array( (int) $reconstrucao['geracao'], (int) $reconstrucao['cursor'] ) );
+					}
 				}
 				if ( ! wp_next_scheduled( CONSULTA_LEVE_BUSCA_GANCHO_DIARIO ) ) {
 					wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', CONSULTA_LEVE_BUSCA_GANCHO_DIARIO );
@@ -702,6 +781,7 @@ KEY modificado (modificado)
 				static function () {
 					wp_clear_scheduled_hook( CONSULTA_LEVE_BUSCA_GANCHO_DIARIO );
 					wp_unschedule_hook( CONSULTA_LEVE_BUSCA_GANCHO_LOTE );
+					wp_unschedule_hook( CONSULTA_LEVE_BUSCA_GANCHO_PENDENTES );
 				}
 			);
 		}
