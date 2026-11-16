@@ -45,7 +45,9 @@ if ( ! function_exists( 'consulta_leve_busca_termo_limpo' ) ) {
 	}
 
 	/**
-	 * IP de quem pede (REMOTE_ADDR; proxy confiável pelo filtro).
+	 * IP de quem pede (REMOTE_ADDR). Atrás de CDN ou proxy, REMOTE_ADDR é o IP
+	 * da borda: o site deve informar o IP real pelo filtro `consulta_leve_ip`
+	 * (só a partir de um cabeçalho que o proxy confiável grava).
 	 *
 	 * @return string
 	 */
@@ -63,28 +65,68 @@ if ( ! function_exists( 'consulta_leve_busca_termo_limpo' ) ) {
 	}
 
 	/**
-	 * Conta um pedido e diz se o IP passou do limite neste minuto.
+	 * Quem conta no limite: usuário logado pelo ID; visitante pelo IP, com
+	 * IPv6 agrupado por /64 (trocar o fim do endereço não zera o limite).
 	 *
-	 * @param string $balde      Nome do limite (busca, rest).
+	 * @return string
+	 */
+	function consulta_leve_limite_quem(): string {
+		$usuario = function_exists( 'get_current_user_id' ) ? (int) get_current_user_id() : 0;
+		if ( $usuario > 0 ) {
+			return 'u' . $usuario;
+		}
+
+		$ip = consulta_leve_ip();
+		if ( false !== filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ) {
+			$bin = inet_pton( $ip );
+			return false === $bin ? $ip : 'v6:' . bin2hex( substr( $bin, 0, 8 ) );
+		}
+
+		return $ip;
+	}
+
+	/**
+	 * Conta um pedido e diz se passou do limite neste minuto.
+	 *
+	 * Com cache de objetos externo: contador atômico por pessoa. Sem ele: um
+	 * transient por balde e minuto (não uma linha por IP), com até 1000
+	 * pessoas; acima disso as novas dividem um contador comum com dez vezes o
+	 * limite. Ataque com muitos IPs não enche wp_options.
+	 *
+	 * @param string $balde      Nome do limite (busca, rest, rest_global).
 	 * @param int    $por_minuto Pedidos aceitos por minuto (0 = sem limite).
+	 * @param bool   $global     Um contador só para todo mundo.
 	 * @return bool Passou do limite?
 	 */
-	function consulta_leve_limite_bateu( string $balde, int $por_minuto ): bool {
+	function consulta_leve_limite_bateu( string $balde, int $por_minuto, bool $global = false ): bool {
 		if ( $por_minuto <= 0 ) {
 			return false;
 		}
 
-		$chave = 'consulta_leve_rl_' . md5( $balde . '|' . consulta_leve_ip() . '|' . (int) floor( time() / 60 ) );
+		$minuto = (int) floor( time() / 60 );
+		$quem   = $global ? '*' : consulta_leve_limite_quem();
 
 		if ( wp_using_ext_object_cache() ) {
+			$chave = 'rl_' . md5( $balde . '|' . $quem . '|' . $minuto );
 			wp_cache_add( $chave, 0, 'consulta_leve_limite', 70 );
-			$n = (int) wp_cache_incr( $chave, 1, 'consulta_leve_limite' );
-		} else {
-			$n = (int) get_transient( $chave ) + 1;
-			set_transient( $chave, $n, 70 );
+			return (int) wp_cache_incr( $chave, 1, 'consulta_leve_limite' ) > $por_minuto;
 		}
 
-		return $n > $por_minuto;
+		$chave    = 'consulta_leve_rl_' . substr( md5( $balde ), 0, 12 ) . '_' . $minuto;
+		$contagem = get_transient( $chave );
+		$contagem = is_array( $contagem ) ? $contagem : array();
+		$id       = substr( md5( $quem ), 0, 12 );
+		$limite   = $por_minuto;
+
+		if ( ! isset( $contagem[ $id ] ) && count( $contagem ) >= 1000 ) {
+			$id     = '*';
+			$limite = $por_minuto * 10;
+		}
+
+		$contagem[ $id ] = (int) ( $contagem[ $id ] ?? 0 ) + 1;
+		set_transient( $chave, $contagem, 70 );
+
+		return $contagem[ $id ] > $limite;
 	}
 
 	/**
@@ -115,6 +157,13 @@ if ( ! function_exists( 'consulta_leve_busca_termo_limpo' ) ) {
 
 		$limpo = consulta_leve_busca_termo_limpo( (string) $q->get( 's' ) );
 		$q->set( 's', $limpo );
+
+		// Limite antes da consulta principal ir ao banco (quem administra fica fora).
+		if ( method_exists( $q, 'is_main_query' ) && $q->is_main_query() && consulta_leve_busca_passou_limite() ) {
+			$q->set( 'post__in', array( 0 ) );
+			$GLOBALS['consulta_leve_busca_429'] = true;
+			return;
+		}
 
 		if ( consulta_leve_busca_letras( $limpo ) < (int) consulta_leve_opcao( 'busca_min' ) ) {
 			// Nada a procurar: lista vazia sem varrer wp_posts.
@@ -166,24 +215,40 @@ if ( ! function_exists( 'consulta_leve_busca_termo_limpo' ) ) {
 	}
 
 	/**
-	 * Limite por IP nas páginas de busca (visitante).
+	 * A busca desta requisição passou do limite por minuto? Conta uma vez só.
+	 * Quem administra (manage_options) não tem limite.
+	 *
+	 * @return bool
+	 */
+	function consulta_leve_busca_passou_limite(): bool {
+		static $resposta = null;
+
+		if ( null === $resposta ) {
+			$resposta = consulta_leve_ativo( 'busca_limite' ) && ! current_user_can( 'manage_options' )
+				&& consulta_leve_limite_bateu( 'busca', (int) consulta_leve_opcao( 'busca_limite' ) );
+		}
+
+		return $resposta;
+	}
+
+	/**
+	 * Busca que passou do limite: resposta 429 (a consulta já saiu vazia, sem
+	 * ir ao banco, no pre_get_posts).
 	 *
 	 * @return void
 	 */
 	function consulta_leve_busca_limite(): void {
-		if ( ! function_exists( 'is_search' ) || ! is_search() || is_user_logged_in() || ! consulta_leve_ativo( 'busca' ) || ! consulta_leve_ativo( 'busca_limite' ) ) {
+		if ( empty( $GLOBALS['consulta_leve_busca_429'] ) ) {
 			return;
 		}
 
-		if ( consulta_leve_limite_bateu( 'busca', (int) consulta_leve_opcao( 'busca_limite' ) ) ) {
-			nocache_headers();
-			header( 'Retry-After: 60' );
-			wp_die(
-				esc_html__( 'Muitas buscas seguidas. Espere um minuto e tente de novo.', 'consulta-leve' ),
-				esc_html__( 'Busca em pausa', 'consulta-leve' ),
-				array( 'response' => 429 )
-			);
-		}
+		nocache_headers();
+		header( 'Retry-After: 60' );
+		wp_die(
+			esc_html__( 'Muitas buscas seguidas. Espere um minuto e tente de novo.', 'consulta-leve' ),
+			esc_html__( 'Busca em pausa', 'consulta-leve' ),
+			array( 'response' => 429 )
+		);
 	}
 
 	/**
@@ -209,6 +274,8 @@ if ( ! function_exists( 'consulta_leve_busca_termo_limpo' ) ) {
 		++$n;
 		$id     = 'cl-busca-' . $n;
 		$rapida = consulta_leve_ativo( 'rest' ) && function_exists( 'rest_url' );
+		// A rota exige 2 letras; o componente nunca pergunta com menos.
+		$minimo = max( 2, (int) consulta_leve_opcao( 'busca_min' ) );
 		$tipos  = implode( ',', consulta_leve_lotes_lista_segura( explode( ',', (string) $atts['tipos'] ) ) );
 		$limite = max( 1, min( 20, (int) $atts['limite'] ) );
 		$dados  = '';
@@ -219,7 +286,7 @@ if ( ! function_exists( 'consulta_leve_busca_termo_limpo' ) ) {
 			$dados = sprintf(
 				' data-cl-busca="%s" data-cl-min="%d" data-cl-tipos="%s" data-cl-limite="%d"',
 				esc_url( rest_url( 'consulta-leve/v1/busca' ) ),
-				(int) consulta_leve_opcao( 'busca_min' ),
+				$minimo,
 				esc_attr( $tipos ),
 				$limite
 			);
