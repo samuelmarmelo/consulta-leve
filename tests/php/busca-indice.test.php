@@ -140,6 +140,24 @@ $sql = implode( "\n", $GLOBALS['cl_t']['consultas'] );
 confere( 'órfãs removidas da tabela', false !== strpos( $sql, 'DELETE FROM wp_consulta_leve_busca WHERE post_id NOT IN (SELECT ID FROM wp_posts)' ), true );
 confere( 'tipos fora removidos', false !== strpos( $sql, "DELETE FROM wp_consulta_leve_busca WHERE post_type NOT IN ('post')" ), true );
 
+/* Geração e corrida --------------------------------------------------------- */
+
+$g1 = consulta_leve_busca_reconstruir_iniciar();
+$g2 = consulta_leve_busca_reconstruir_iniciar();
+confere( 'duas reconstruções no mesmo segundo: gerações diferentes', $g2 > $g1, true );
+confere( 'lote velho não grava por cima da geração nova', consulta_leve_busca_estado_salvar( $g1, array( 'geracao' => $g1, 'cursor' => 99 ) ), false );
+confere( 'estado da geração nova intacto', get_option( 'consulta_leve_busca_reconstrucao' )['cursor'], 0 );
+confere( 'lote velho não encerra a geração nova', consulta_leve_busca_estado_salvar( $g1, null ), false );
+confere( 'geração atual grava', consulta_leve_busca_estado_salvar( $g2, null ), true );
+
+// Trava da lista ocupada: adiar não perde IDs, começa a reconstrução.
+delete_option( 'consulta_leve_busca_reconstrucao' );
+$ocupada = consulta_leve_travar( 'busca_pendentes_lista', 10 );
+consulta_leve_busca_adiar( array( 77 ) );
+confere( 'lista ocupada: reconstrução no lugar', ! empty( get_option( 'consulta_leve_busca_reconstrucao' )['geracao'] ), true );
+consulta_leve_liberar( 'busca_pendentes_lista', $ocupada );
+delete_option( 'consulta_leve_busca_reconstrucao' );
+
 /* Consulta ------------------------------------------------------------------ */
 
 $GLOBALS['cl_t']['sql']['/SELECT post_id, post_date FROM wp_consulta_leve_busca/'] = static function ( $sql ) {
