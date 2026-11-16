@@ -1,0 +1,15 @@
+name: Ideia
+description: Um método de consulta ou diagnóstico que falta.
+labels: [ideia]
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Qual consulta fica lenta e em que volume?
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: O que você propõe
+      description: Como o método complementa o que o tema já faz, sem sobrescrever.
