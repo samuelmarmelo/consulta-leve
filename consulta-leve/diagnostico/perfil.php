@@ -174,6 +174,14 @@ if ( ! function_exists( 'consulta_leve_perfil_modo_pedido' ) ) {
 			}
 		}
 
+		// Sem prefixo conhecido: a mais interna que não seja o próprio banco
+		// (wpdb, driver do SQLite) nem a maquinaria de ganchos e includes.
+		foreach ( $partes as $parte ) {
+			if ( '' !== $parte && 1 !== preg_match( '/^(?:wpdb->|WP_SQLite_|WP_Hook->|require|include|do_action|apply_filters|call_user_func)/', $parte ) ) {
+				return substr( $parte, 0, 80 );
+			}
+		}
+
 		return substr( (string) ( $partes[0] ?? '' ), 0, 80 );
 	}
 
@@ -281,7 +289,7 @@ if ( ! function_exists( 'consulta_leve_perfil_modo_pedido' ) ) {
 			'banco_ida_volta_ms' => $ida_volta,
 			'php'                => PHP_VERSION,
 			'banco'              => method_exists( $wpdb, 'db_server_info' ) ? (string) $wpdb->db_server_info() : '',
-			'cache_objetos'      => wp_using_ext_object_cache(),
+			'cache_objetos'      => (bool) wp_using_ext_object_cache(),
 			'opcache'            => function_exists( 'opcache_get_status' ) && is_array( @opcache_get_status( false ) ), // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- API restrita avisa; aqui só importa sim/não.
 			'autoload_n'         => (int) ( $autoload['n'] ?? 0 ),
 			'autoload_kb'        => round( (int) ( $autoload['bytes'] ?? 0 ) / 1024, 1 ),

@@ -28,7 +28,7 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 	 * @return array{externo:bool,dropin:bool,ms:float}
 	 */
 	function consulta_leve_diag_cache(): array {
-		$externo = wp_using_ext_object_cache();
+		$externo = (bool) wp_using_ext_object_cache();
 		$dropin  = defined( 'WP_CONTENT_DIR' ) && is_file( WP_CONTENT_DIR . '/object-cache.php' );
 		$ms      = 0.0;
 

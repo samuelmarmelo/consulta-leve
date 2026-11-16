@@ -445,7 +445,8 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 		} elseif ( 'indice_tipos' === $chave ) {
 			$cobertos = consulta_leve_indice_tipos_cobertos();
 			foreach ( get_post_types( array( 'show_ui' => true ), 'objects' ) as $tipo ) {
-				if ( 'attachment' === $tipo->name || 'wp_block' === $tipo->name ) {
+				// Tipos internos do WordPress (anexos, blocos, navegação, modelos) ficam de fora.
+				if ( 'attachment' === $tipo->name || 0 === strpos( $tipo->name, 'wp_' ) ) {
 					continue;
 				}
 				$coberto = in_array( $tipo->name, $cobertos, true );
