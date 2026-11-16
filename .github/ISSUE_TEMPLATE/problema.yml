@@ -1,0 +1,25 @@
+name: Problema
+description: Algo não funciona como o contrato descreve.
+labels: [problema]
+body:
+  - type: input
+    id: versao
+    attributes:
+      label: Versão da Consulta Leve
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: ambiente
+    attributes:
+      label: WordPress, PHP e banco
+      placeholder: WordPress 6.8, PHP 8.3, MySQL 8.0
+    validations:
+      required: true
+  - type: textarea
+    id: passos
+    attributes:
+      label: Passo a passo
+      description: O que você fez, o que esperava e o que aconteceu. Se puder, cole o resumo do perfil (cabeçalho X-Consulta-Leve-Perfil) sem dados pessoais.
+    validations:
+      required: true
