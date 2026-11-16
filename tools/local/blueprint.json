@@ -1,0 +1,42 @@
+{
+  "$schema": "https://playground.wordpress.net/blueprint-schema.json",
+  "meta": {
+    "title": "Consulta Leve local",
+    "description": "WordPress com o plugin consulta-leve montado do repositório e 6 mil posts fictícios.",
+    "author": "consulta-leve"
+  },
+  "landingPage": "/wp-admin/tools.php?page=consulta-leve",
+  "preferredVersions": {
+    "php": "8.3",
+    "wp": "latest"
+  },
+  "steps": [
+    {
+      "step": "defineWpConfigConsts",
+      "consts": {
+        "WP_ENVIRONMENT_TYPE": "local",
+        "WP_DEBUG": true,
+        "WP_DEBUG_LOG": "/consulta-leve-local/.logs/debug.log",
+        "WP_DEBUG_DISPLAY": false,
+        "WP_MEMORY_LIMIT": "512M",
+        "AUTOMATIC_UPDATER_DISABLED": true
+      }
+    },
+    {
+      "step": "runPHP",
+      "code": "<?php require '/wordpress/wp-load.php'; $f = '/consulta-leve-local/admin.local.json'; if ( file_exists( $f ) ) { $c = json_decode( file_get_contents( $f ), true ); $u = get_user_by( 'login', 'admin' ); if ( $u && ! empty( $c['password'] ) ) { wp_set_password( $c['password'], $u->ID ); } }"
+    },
+    {
+      "step": "setSiteLanguage",
+      "language": "pt_BR"
+    },
+    {
+      "step": "runPHP",
+      "code": "<?php ini_set( 'display_errors', '1' ); error_reporting( E_ALL ); require '/wordpress/wp-load.php'; require_once ABSPATH . 'wp-admin/includes/plugin.php'; $r = activate_plugin( 'consulta-leve/consulta-leve.php' ); if ( is_wp_error( $r ) ) { echo 'ERRO ATIVACAO: ' . $r->get_error_message(); exit( 1 ); }"
+    },
+    {
+      "step": "runPHP",
+      "code": "<?php require '/wordpress/wp-load.php'; require '/consulta-leve-local/semente.php';"
+    }
+  ]
+}
