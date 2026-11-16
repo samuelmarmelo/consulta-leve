@@ -1,0 +1,75 @@
+/* Busca rápida da Consulta Leve: herda fonte e cores do tema. */
+.cl-busca {
+	position: relative;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	max-width: 100%;
+}
+
+.cl-busca__rotulo {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}
+
+.cl-busca__campo {
+	flex: 1 1 12rem;
+	min-width: 0;
+}
+
+.cl-busca__lista {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	z-index: 50;
+	margin: 0.25rem 0 0;
+	padding: 0.25rem 0;
+	list-style: none;
+	background: #fff;
+	color: #1d2327;
+	border: 1px solid rgba(0, 0, 0, 0.15);
+	border-radius: 4px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+	max-height: 22rem;
+	overflow-y: auto;
+}
+
+.cl-busca__link,
+.cl-busca__mais button {
+	display: block;
+	width: 100%;
+	padding: 0.5rem 0.75rem;
+	color: inherit;
+	text-align: left;
+	text-decoration: none;
+	background: none;
+	border: 0;
+	font: inherit;
+	cursor: pointer;
+}
+
+.cl-busca__link:hover,
+.cl-busca__link:focus,
+.cl-busca__mais button:hover,
+.cl-busca__mais button:focus {
+	background: rgba(0, 0, 0, 0.05);
+	outline: 2px solid currentColor;
+	outline-offset: -2px;
+}
+
+.cl-busca__aviso {
+	flex-basis: 100%;
+	margin: 0;
+	font-size: 0.875em;
+	min-height: 1em;
+}
+
+.cl-busca__aviso:empty {
+	display: none;
+}
