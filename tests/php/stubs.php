@@ -265,6 +265,37 @@ if ( ! function_exists( 'wp_json_encode' ) ) {
 	function get_theme_support( $f ) { // phpcs:ignore
 		return $GLOBALS['cl_t']['suporte'][ $f ] ?? false;
 	}
+	function wp_strip_all_tags( $t ) { // phpcs:ignore
+		return trim( strip_tags( (string) $t ) );
+	}
+	function strip_shortcodes( $t ) { // phpcs:ignore
+		return preg_replace( '/\[[^\]]*\]/', '', (string) $t );
+	}
+	function is_user_logged_in() { // phpcs:ignore
+		return (int) $GLOBALS['cl_t']['usuario'] > 0;
+	}
+	function wp_schedule_single_event( $quando, $gancho, $args = array() ) { // phpcs:ignore
+		$GLOBALS['cl_t']['agendados'][] = array( $gancho, $args );
+		return true;
+	}
+	function wp_schedule_event( $quando, $rec, $gancho, $args = array() ) { // phpcs:ignore
+		$GLOBALS['cl_t']['agendados'][] = array( $gancho, $rec );
+		return true;
+	}
+	function wp_next_scheduled( $gancho, $args = array() ) { // phpcs:ignore
+		foreach ( $GLOBALS['cl_t']['agendados'] ?? array() as $a ) {
+			if ( $a[0] === $gancho ) {
+				return time();
+			}
+		}
+		return false;
+	}
+	function wp_clear_scheduled_hook( $g ) { // phpcs:ignore
+		return 0;
+	}
+	function wp_unschedule_hook( $g ) { // phpcs:ignore
+		return 0;
+	}
 	function wp_doing_ajax() { // phpcs:ignore
 		return false;
 	}
@@ -362,6 +393,19 @@ if ( ! class_exists( 'CL_Teste_Wpdb' ) ) {
 			}
 			$r = $this->programada( $sql );
 			return null === $r ? 0 : $r;
+		}
+		public function replace( $tabela, $dados, $formato = null ) {
+			$this->registrar( 'REPLACE ' . $tabela . ' ' . json_encode( $dados ) );
+			$GLOBALS['cl_t']['linhas'][ $tabela ][ $dados['post_id'] ?? count( $GLOBALS['cl_t']['linhas'][ $tabela ] ?? array() ) ] = $dados;
+			return 1;
+		}
+		public function delete( $tabela, $onde, $formato = null ) {
+			$this->registrar( 'DELETE ' . $tabela . ' ' . json_encode( $onde ) );
+			unset( $GLOBALS['cl_t']['linhas'][ $tabela ][ $onde['post_id'] ?? -1 ] );
+			return 1;
+		}
+		public function get_charset_collate() {
+			return 'DEFAULT CHARSET=utf8mb4';
 		}
 		public function suppress_errors( $s = true ) {
 			return false;
