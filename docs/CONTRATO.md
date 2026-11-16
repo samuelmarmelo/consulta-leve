@@ -294,8 +294,9 @@ Resultado em cache versionado 60 s.
 
 `indice_na_busca` (desligado): a busca do núcleo dos tipos indexados troca
 o `LIKE` em `wp_posts` por `ID IN (ids da tabela)` limitado a 500 IDs,
-mantendo ordenação e paginação do WordPress. Tabela fora de `pronta`: busca
-do núcleo intocada.
+mantendo ordenação e paginação do WordPress. Anexos não entram na tabela,
+então não aparecem nessa busca. Tabela fora de `pronta`: busca do núcleo
+intocada.
 
 ## 8. Busca do núcleo (`busca/busca.php`)
 
@@ -326,7 +327,7 @@ o shortcode imprime um formulário de busca comum (SafeWidget).
 `GET /wp-json/consulta-leve/v1/busca`, pública, desligada por padrão.
 
 - Entrada: `termo` (texto, 2 a 80), `tipos` (lista; só tipos públicos e
-  pesquisáveis), `por_pagina` (1 a 20, padrão 8), `cursor`.
+  pesquisáveis, sem anexos), `por_pagina` (1 a 20, padrão 8), `cursor`.
 - Saída: `itens: [{ id, titulo, url, tipo, data }]`, `proximo`. Só post
   `publish`, sem senha, de tipo público.
 - Usa a tabela de busca quando `pronta`; senão `WP_Query` perfil `ids`,

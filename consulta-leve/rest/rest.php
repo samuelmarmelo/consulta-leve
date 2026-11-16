@@ -82,7 +82,8 @@ if ( ! function_exists( 'consulta_leve_rest_etag_bate' ) ) {
 	 * @return string[]
 	 */
 	function consulta_leve_rest_tipos_aceitos(): array {
-		return array_values( get_post_types( array( 'public' => true, 'exclude_from_search' => false ) ) );
+		// Anexos ficam de fora: o status deles é inherit, nunca publish.
+		return array_values( array_diff( get_post_types( array( 'public' => true, 'exclude_from_search' => false ) ), array( 'attachment' ) ) );
 	}
 
 	/**
