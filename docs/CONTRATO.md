@@ -207,10 +207,15 @@ para continuar depois. Opção `adiar_contagem` liga
 
 `consulta_leve_lembrar( string $grupo, $chave, callable $calcular, array $o = array() )`.
 
-- Chave final: `consulta_leve_` + grupo + versão do grupo + versões das
-  dependências + md5 da chave. Dependências (`deps`): `posts`, `terms`,
-  `comments`, `users` usam `wp_cache_get_last_changed()` do núcleo, que
-  o próprio WordPress muda a cada alteração; nada a invalidar à mão.
+- Chave final: `consulta_leve_` + grupo + md5 da versão do grupo, das
+  versões das dependências e da chave. Dependências (`deps`): `posts`,
+  `terms`, `comments`, `users`. Com cache de objetos externo, usam o
+  `wp_cache_get_last_changed()` do núcleo. Sem ele (o last_changed do
+  núcleo renasce a cada requisição), usam versões próprias `dep_*`,
+  mudadas pelos ganchos `clean_post_cache`, `transition_post_status`,
+  metas de post (menos `_edit_lock` e `_edit_last`), `clean_term_cache`,
+  `set_object_terms`, `clean_comment_cache` e `clean_user_cache`, e
+  gravadas uma vez por requisição, no `shutdown`. Nada a invalidar à mão.
 - `escopo`: `publico` (padrão) ou `usuario` (acrescenta ID e papéis):
   dado de uma pessoa nunca chega a outra.
 - Onde guarda: cache de objetos externo (grupo `consulta_leve`) quando
