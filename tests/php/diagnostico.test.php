@@ -39,6 +39,7 @@ confere(
 );
 confere( 'prefixo do tema reconhecido', consulta_leve_perfil_prefixos(), array( 'consulta_leve_', 'meu_crm_' ) );
 confere( 'quem chamou: função do tema', consulta_leve_perfil_quem( 'require, do_action, meu_crm_board, WP_Query->get_posts', array( 'meu_crm_' ) ), 'meu_crm_board' );
+confere( 'quem chamou: pula o driver do SQLite e o wpdb', consulta_leve_perfil_quem( 'require, do_action, WP_Hook->apply_filters, minha_lista, WP_Query->get_posts, wpdb->query, WP_SQLite_DB->_do_query', array( 'x_' ) ), 'WP_Query->get_posts' );
 confere( 'quem chamou: a mais interna sem prefixo', consulta_leve_perfil_quem( 'a, b, get_option', array( 'x_' ) ), 'get_option' );
 
 $lista = array(

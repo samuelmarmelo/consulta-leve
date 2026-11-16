@@ -611,7 +611,8 @@ KEY modificado (modificado)
 		if ( empty( $tipos ) || 'any' === $tipos ) {
 			$tipos = get_post_types( array( 'exclude_from_search' => false ) );
 		}
-		$tipos = array_values( (array) $tipos );
+		// Anexos não entram na tabela; com ela ligada, a busca do site não os lista.
+		$tipos = array_values( array_diff( (array) $tipos, array( 'attachment' ) ) );
 		if ( array_diff( $tipos, consulta_leve_busca_tipos() ) ) {
 			return $sql;
 		}
