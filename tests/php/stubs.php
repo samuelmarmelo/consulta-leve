@@ -50,258 +50,376 @@ cl_teste_reset();
 
 /* Ganchos ------------------------------------------------------------------ */
 
-if ( ! function_exists( 'add_filter' ) ) {
-	function add_filter( $nome, $cb, $prio = 10, $args = 1 ) { // phpcs:ignore
-		$GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ][] = array( $cb, (int) $args );
-		return true;
-	}
-	function add_action( $nome, $cb, $prio = 10, $args = 1 ) { // phpcs:ignore
-		return add_filter( $nome, $cb, $prio, $args );
-	}
-	function has_filter( $nome, $cb = false ) { // phpcs:ignore
-		if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ] ) ) {
-			return false;
-		}
-		if ( false === $cb ) {
+{
+	if ( ! function_exists( 'add_filter' ) ) {
+		function add_filter( $nome, $cb, $prio = 10, $args = 1 ) { // phpcs:ignore
+			$GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ][] = array( $cb, (int) $args );
 			return true;
 		}
-		foreach ( $GLOBALS['cl_t']['ganchos'][ $nome ] as $prio => $lista ) {
-			foreach ( $lista as $item ) {
+	}
+	if ( ! function_exists( 'add_action' ) ) {
+		function add_action( $nome, $cb, $prio = 10, $args = 1 ) { // phpcs:ignore
+			return add_filter( $nome, $cb, $prio, $args );
+		}
+	}
+	if ( ! function_exists( 'has_filter' ) ) {
+		function has_filter( $nome, $cb = false ) { // phpcs:ignore
+			if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ] ) ) {
+				return false;
+			}
+			if ( false === $cb ) {
+				return true;
+			}
+			foreach ( $GLOBALS['cl_t']['ganchos'][ $nome ] as $prio => $lista ) {
+				foreach ( $lista as $item ) {
+					if ( $item[0] === $cb ) {
+						return $prio;
+					}
+				}
+			}
+			return false;
+		}
+	}
+	if ( ! function_exists( 'has_action' ) ) {
+		function has_action( $nome, $cb = false ) { // phpcs:ignore
+			return has_filter( $nome, $cb );
+		}
+	}
+	if ( ! function_exists( 'remove_filter' ) ) {
+		function remove_filter( $nome, $cb, $prio = 10 ) { // phpcs:ignore
+			if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ] ) ) {
+				return false;
+			}
+			foreach ( $GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ] as $i => $item ) {
 				if ( $item[0] === $cb ) {
-					return $prio;
+					unset( $GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ][ $i ] );
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+	if ( ! function_exists( 'remove_action' ) ) {
+		function remove_action( $nome, $cb, $prio = 10 ) { // phpcs:ignore
+			return remove_filter( $nome, $cb, $prio );
+		}
+	}
+	if ( ! function_exists( 'apply_filters' ) ) {
+		function apply_filters( $nome, $valor, ...$resto ) { // phpcs:ignore
+			if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ] ) ) {
+				return $valor;
+			}
+			$lista = $GLOBALS['cl_t']['ganchos'][ $nome ];
+			ksort( $lista );
+			foreach ( $lista as $itens ) {
+				foreach ( $itens as $item ) {
+					$valor = call_user_func_array( $item[0], array_slice( array_merge( array( $valor ), $resto ), 0, $item[1] ) );
+				}
+			}
+			return $valor;
+		}
+	}
+	if ( ! function_exists( 'do_action' ) ) {
+		function do_action( $nome, ...$args ) { // phpcs:ignore
+			$GLOBALS['cl_t']['feitos'][ $nome ] = ( $GLOBALS['cl_t']['feitos'][ $nome ] ?? 0 ) + 1;
+			if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ] ) ) {
+				return;
+			}
+			$lista = $GLOBALS['cl_t']['ganchos'][ $nome ];
+			ksort( $lista );
+			foreach ( $lista as $itens ) {
+				foreach ( $itens as $item ) {
+					call_user_func_array( $item[0], array_slice( $args, 0, $item[1] ) );
 				}
 			}
 		}
-		return false;
 	}
-	function has_action( $nome, $cb = false ) { // phpcs:ignore
-		return has_filter( $nome, $cb );
-	}
-	function remove_filter( $nome, $cb, $prio = 10 ) { // phpcs:ignore
-		if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ] ) ) {
-			return false;
+	if ( ! function_exists( 'did_action' ) ) {
+		function did_action( $nome ) { // phpcs:ignore
+			return $GLOBALS['cl_t']['feitos'][ $nome ] ?? 0;
 		}
-		foreach ( $GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ] as $i => $item ) {
-			if ( $item[0] === $cb ) {
-				unset( $GLOBALS['cl_t']['ganchos'][ $nome ][ $prio ][ $i ] );
-				return true;
-			}
-		}
-		return false;
-	}
-	function remove_action( $nome, $cb, $prio = 10 ) { // phpcs:ignore
-		return remove_filter( $nome, $cb, $prio );
-	}
-	function apply_filters( $nome, $valor, ...$resto ) { // phpcs:ignore
-		if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ] ) ) {
-			return $valor;
-		}
-		$lista = $GLOBALS['cl_t']['ganchos'][ $nome ];
-		ksort( $lista );
-		foreach ( $lista as $itens ) {
-			foreach ( $itens as $item ) {
-				$valor = call_user_func_array( $item[0], array_slice( array_merge( array( $valor ), $resto ), 0, $item[1] ) );
-			}
-		}
-		return $valor;
-	}
-	function do_action( $nome, ...$args ) { // phpcs:ignore
-		$GLOBALS['cl_t']['feitos'][ $nome ] = ( $GLOBALS['cl_t']['feitos'][ $nome ] ?? 0 ) + 1;
-		if ( empty( $GLOBALS['cl_t']['ganchos'][ $nome ] ) ) {
-			return;
-		}
-		$lista = $GLOBALS['cl_t']['ganchos'][ $nome ];
-		ksort( $lista );
-		foreach ( $lista as $itens ) {
-			foreach ( $itens as $item ) {
-				call_user_func_array( $item[0], array_slice( $args, 0, $item[1] ) );
-			}
-		}
-	}
-	function did_action( $nome ) { // phpcs:ignore
-		return $GLOBALS['cl_t']['feitos'][ $nome ] ?? 0;
 	}
 }
 
 /* Opções, transients e cache ------------------------------------------------ */
 
-if ( ! function_exists( 'get_option' ) ) {
-	function get_option( $k, $padrao = false ) { // phpcs:ignore
-		return array_key_exists( $k, $GLOBALS['cl_t']['opcoes'] ) ? $GLOBALS['cl_t']['opcoes'][ $k ] : $padrao;
-	}
-	function add_option( $k, $v = '', $x = '', $auto = null ) { // phpcs:ignore
-		if ( array_key_exists( $k, $GLOBALS['cl_t']['opcoes'] ) ) {
-			return false;
+{
+	if ( ! function_exists( 'get_option' ) ) {
+		function get_option( $k, $padrao = false ) { // phpcs:ignore
+			return array_key_exists( $k, $GLOBALS['cl_t']['opcoes'] ) ? $GLOBALS['cl_t']['opcoes'][ $k ] : $padrao;
 		}
-		$GLOBALS['cl_t']['opcoes'][ $k ] = $v;
-		return true;
 	}
-	function update_option( $k, $v, $auto = null ) { // phpcs:ignore
-		$antes                           = get_option( $k );
-		$GLOBALS['cl_t']['opcoes'][ $k ] = $v;
-		do_action( 'update_option_' . $k, $antes, $v, $k );
-		return true;
-	}
-	function delete_option( $k ) { // phpcs:ignore
-		unset( $GLOBALS['cl_t']['opcoes'][ $k ] );
-		return true;
-	}
-	function get_transient( $k ) { // phpcs:ignore
-		return $GLOBALS['cl_t']['transients'][ $k ] ?? false;
-	}
-	function set_transient( $k, $v, $t = 0 ) { // phpcs:ignore
-		$GLOBALS['cl_t']['transients'][ $k ] = $v;
-		return true;
-	}
-	function delete_transient( $k ) { // phpcs:ignore
-		unset( $GLOBALS['cl_t']['transients'][ $k ] );
-		return true;
-	}
-	function get_site_transient( $k ) { // phpcs:ignore
-		return $GLOBALS['cl_t']['site'][ $k ] ?? false;
-	}
-	function set_site_transient( $k, $v, $t = 0 ) { // phpcs:ignore
-		$GLOBALS['cl_t']['site'][ $k ] = $v;
-		return true;
-	}
-	function delete_site_transient( $k ) { // phpcs:ignore
-		unset( $GLOBALS['cl_t']['site'][ $k ] );
-		return true;
-	}
-	function wp_using_ext_object_cache() { // phpcs:ignore
-		return (bool) $GLOBALS['cl_t']['externo'];
-	}
-	function wp_cache_get( $k, $g = '' ) { // phpcs:ignore
-		return $GLOBALS['cl_t']['cache'][ $g ][ $k ] ?? false;
-	}
-	function wp_cache_set( $k, $v, $g = '', $t = 0 ) { // phpcs:ignore
-		$GLOBALS['cl_t']['cache'][ $g ][ $k ] = $v;
-		return true;
-	}
-	function wp_cache_add( $k, $v, $g = '', $t = 0 ) { // phpcs:ignore
-		if ( isset( $GLOBALS['cl_t']['cache'][ $g ][ $k ] ) ) {
-			return false;
+	if ( ! function_exists( 'add_option' ) ) {
+		function add_option( $k, $v = '', $x = '', $auto = null ) { // phpcs:ignore
+			if ( array_key_exists( $k, $GLOBALS['cl_t']['opcoes'] ) ) {
+				return false;
+			}
+			$GLOBALS['cl_t']['opcoes'][ $k ] = $v;
+			return true;
 		}
-		return wp_cache_set( $k, $v, $g, $t );
 	}
-	function wp_cache_incr( $k, $n = 1, $g = '' ) { // phpcs:ignore
-		if ( ! isset( $GLOBALS['cl_t']['cache'][ $g ][ $k ] ) ) {
-			return false;
+	if ( ! function_exists( 'update_option' ) ) {
+		function update_option( $k, $v, $auto = null ) { // phpcs:ignore
+			$antes                           = get_option( $k );
+			$GLOBALS['cl_t']['opcoes'][ $k ] = $v;
+			do_action( 'update_option_' . $k, $antes, $v, $k );
+			return true;
 		}
-		$GLOBALS['cl_t']['cache'][ $g ][ $k ] += $n;
-		return $GLOBALS['cl_t']['cache'][ $g ][ $k ];
 	}
-	function wp_cache_delete( $k, $g = '' ) { // phpcs:ignore
-		unset( $GLOBALS['cl_t']['cache'][ $g ][ $k ] );
-		return true;
-	}
-	function wp_cache_get_last_changed( $g ) { // phpcs:ignore
-		if ( ! isset( $GLOBALS['cl_t']['cache'][ $g ]['last_changed'] ) ) {
-			$GLOBALS['cl_t']['cache'][ $g ]['last_changed'] = (string) microtime( true );
+	if ( ! function_exists( 'delete_option' ) ) {
+		function delete_option( $k ) { // phpcs:ignore
+			unset( $GLOBALS['cl_t']['opcoes'][ $k ] );
+			return true;
 		}
-		return $GLOBALS['cl_t']['cache'][ $g ]['last_changed'];
+	}
+	if ( ! function_exists( 'get_transient' ) ) {
+		function get_transient( $k ) { // phpcs:ignore
+			return $GLOBALS['cl_t']['transients'][ $k ] ?? false;
+		}
+	}
+	if ( ! function_exists( 'set_transient' ) ) {
+		function set_transient( $k, $v, $t = 0 ) { // phpcs:ignore
+			$GLOBALS['cl_t']['transients'][ $k ] = $v;
+			return true;
+		}
+	}
+	if ( ! function_exists( 'delete_transient' ) ) {
+		function delete_transient( $k ) { // phpcs:ignore
+			unset( $GLOBALS['cl_t']['transients'][ $k ] );
+			return true;
+		}
+	}
+	if ( ! function_exists( 'get_site_transient' ) ) {
+		function get_site_transient( $k ) { // phpcs:ignore
+			return $GLOBALS['cl_t']['site'][ $k ] ?? false;
+		}
+	}
+	if ( ! function_exists( 'set_site_transient' ) ) {
+		function set_site_transient( $k, $v, $t = 0 ) { // phpcs:ignore
+			$GLOBALS['cl_t']['site'][ $k ] = $v;
+			return true;
+		}
+	}
+	if ( ! function_exists( 'delete_site_transient' ) ) {
+		function delete_site_transient( $k ) { // phpcs:ignore
+			unset( $GLOBALS['cl_t']['site'][ $k ] );
+			return true;
+		}
+	}
+	if ( ! function_exists( 'wp_using_ext_object_cache' ) ) {
+		function wp_using_ext_object_cache() { // phpcs:ignore
+			return (bool) $GLOBALS['cl_t']['externo'];
+		}
+	}
+	if ( ! function_exists( 'wp_cache_get' ) ) {
+		function wp_cache_get( $k, $g = '' ) { // phpcs:ignore
+			return $GLOBALS['cl_t']['cache'][ $g ][ $k ] ?? false;
+		}
+	}
+	if ( ! function_exists( 'wp_cache_set' ) ) {
+		function wp_cache_set( $k, $v, $g = '', $t = 0 ) { // phpcs:ignore
+			$GLOBALS['cl_t']['cache'][ $g ][ $k ] = $v;
+			return true;
+		}
+	}
+	if ( ! function_exists( 'wp_cache_add' ) ) {
+		function wp_cache_add( $k, $v, $g = '', $t = 0 ) { // phpcs:ignore
+			if ( isset( $GLOBALS['cl_t']['cache'][ $g ][ $k ] ) ) {
+				return false;
+			}
+			return wp_cache_set( $k, $v, $g, $t );
+		}
+	}
+	if ( ! function_exists( 'wp_cache_incr' ) ) {
+		function wp_cache_incr( $k, $n = 1, $g = '' ) { // phpcs:ignore
+			if ( ! isset( $GLOBALS['cl_t']['cache'][ $g ][ $k ] ) ) {
+				return false;
+			}
+			$GLOBALS['cl_t']['cache'][ $g ][ $k ] += $n;
+			return $GLOBALS['cl_t']['cache'][ $g ][ $k ];
+		}
+	}
+	if ( ! function_exists( 'wp_cache_delete' ) ) {
+		function wp_cache_delete( $k, $g = '' ) { // phpcs:ignore
+			unset( $GLOBALS['cl_t']['cache'][ $g ][ $k ] );
+			return true;
+		}
+	}
+	if ( ! function_exists( 'wp_cache_get_last_changed' ) ) {
+		function wp_cache_get_last_changed( $g ) { // phpcs:ignore
+			if ( ! isset( $GLOBALS['cl_t']['cache'][ $g ]['last_changed'] ) ) {
+				$GLOBALS['cl_t']['cache'][ $g ]['last_changed'] = (string) microtime( true );
+			}
+			return $GLOBALS['cl_t']['cache'][ $g ]['last_changed'];
+		}
 	}
 }
 
 /* Utilidades ---------------------------------------------------------------- */
 
-if ( ! function_exists( 'wp_json_encode' ) ) {
-	function wp_json_encode( $v, $f = 0 ) { // phpcs:ignore
-		return json_encode( $v, $f );
-	}
-	function __( $t, $d = '' ) { // phpcs:ignore
-		return $t;
-	}
-	function esc_html__( $t, $d = '' ) { // phpcs:ignore
-		return htmlspecialchars( $t, ENT_QUOTES );
-	}
-	function esc_html( $t ) { // phpcs:ignore
-		return htmlspecialchars( (string) $t, ENT_QUOTES );
-	}
-	function esc_attr( $t ) { // phpcs:ignore
-		return htmlspecialchars( (string) $t, ENT_QUOTES );
-	}
-	function esc_url( $t ) { // phpcs:ignore
-		return (string) $t;
-	}
-	function sanitize_key( $k ) { // phpcs:ignore
-		return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $k ) );
-	}
-	function sanitize_text_field( $t ) { // phpcs:ignore
-		return trim( preg_replace( '/[\r\n\t ]+/', ' ', strip_tags( (string) $t ) ) );
-	}
-	function wp_unslash( $v ) { // phpcs:ignore
-		return is_string( $v ) ? stripslashes( $v ) : $v;
-	}
-	function absint( $v ) { // phpcs:ignore
-		return abs( (int) $v );
-	}
-	function wp_salt( $s = 'auth' ) { // phpcs:ignore
-		return 'sal-de-teste-' . $s;
-	}
-	function wp_hash( $dado, $s = 'auth', $algo = 'md5' ) { // phpcs:ignore
-		return hash_hmac( $algo, $dado, wp_salt( $s ) );
-	}
-	function remove_accents( $t ) { // phpcs:ignore
-		$de   = array( 'á', 'à', 'â', 'ã', 'ä', 'é', 'è', 'ê', 'ë', 'í', 'ì', 'î', 'ï', 'ó', 'ò', 'ô', 'õ', 'ö', 'ú', 'ù', 'û', 'ü', 'ç', 'ñ', 'Á', 'À', 'Â', 'Ã', 'É', 'Ê', 'Í', 'Ó', 'Ô', 'Õ', 'Ú', 'Ç' );
-		$para = array( 'a', 'a', 'a', 'a', 'a', 'e', 'e', 'e', 'e', 'i', 'i', 'i', 'i', 'o', 'o', 'o', 'o', 'o', 'u', 'u', 'u', 'u', 'c', 'n', 'A', 'A', 'A', 'A', 'E', 'E', 'I', 'O', 'O', 'O', 'U', 'C' );
-		return str_replace( $de, $para, (string) $t );
-	}
-	function is_admin() { // phpcs:ignore
-		return (bool) $GLOBALS['cl_t']['admin'];
-	}
-	function get_current_user_id() { // phpcs:ignore
-		return (int) $GLOBALS['cl_t']['usuario'];
-	}
-	function wp_get_current_user() { // phpcs:ignore
-		return (object) array(
-			'ID'    => (int) $GLOBALS['cl_t']['usuario'],
-			'roles' => $GLOBALS['cl_t']['papeis'],
-		);
-	}
-	function current_user_can( $cap ) { // phpcs:ignore
-		return ! empty( $GLOBALS['cl_t']['pode'][ $cap ] );
-	}
-	function get_theme_support( $f ) { // phpcs:ignore
-		return $GLOBALS['cl_t']['suporte'][ $f ] ?? false;
-	}
-	function wp_strip_all_tags( $t ) { // phpcs:ignore
-		return trim( strip_tags( (string) $t ) );
-	}
-	function strip_shortcodes( $t ) { // phpcs:ignore
-		return preg_replace( '/\[[^\]]*\]/', '', (string) $t );
-	}
-	function is_user_logged_in() { // phpcs:ignore
-		return (int) $GLOBALS['cl_t']['usuario'] > 0;
-	}
-	function wp_schedule_single_event( $quando, $gancho, $args = array() ) { // phpcs:ignore
-		$GLOBALS['cl_t']['agendados'][] = array( $gancho, $args );
-		return true;
-	}
-	function wp_schedule_event( $quando, $rec, $gancho, $args = array() ) { // phpcs:ignore
-		$GLOBALS['cl_t']['agendados'][] = array( $gancho, $rec );
-		return true;
-	}
-	function wp_next_scheduled( $gancho, $args = array() ) { // phpcs:ignore
-		foreach ( $GLOBALS['cl_t']['agendados'] ?? array() as $a ) {
-			if ( $a[0] === $gancho ) {
-				return time();
-			}
+{
+	if ( ! function_exists( 'wp_json_encode' ) ) {
+		function wp_json_encode( $v, $f = 0 ) { // phpcs:ignore
+			return json_encode( $v, $f );
 		}
-		return false;
 	}
-	function wp_clear_scheduled_hook( $g ) { // phpcs:ignore
-		return 0;
+	if ( ! function_exists( '__' ) ) {
+		function __( $t, $d = '' ) { // phpcs:ignore
+			return $t;
+		}
 	}
-	function wp_unschedule_hook( $g ) { // phpcs:ignore
-		return 0;
+	if ( ! function_exists( 'esc_html__' ) ) {
+		function esc_html__( $t, $d = '' ) { // phpcs:ignore
+			return htmlspecialchars( $t, ENT_QUOTES );
+		}
 	}
-	function wp_doing_ajax() { // phpcs:ignore
-		return false;
+	if ( ! function_exists( 'esc_html' ) ) {
+		function esc_html( $t ) { // phpcs:ignore
+			return htmlspecialchars( (string) $t, ENT_QUOTES );
+		}
 	}
-	function wp_doing_cron() { // phpcs:ignore
-		return false;
+	if ( ! function_exists( 'esc_attr' ) ) {
+		function esc_attr( $t ) { // phpcs:ignore
+			return htmlspecialchars( (string) $t, ENT_QUOTES );
+		}
 	}
+	if ( ! function_exists( 'esc_url' ) ) {
+		function esc_url( $t ) { // phpcs:ignore
+			return (string) $t;
+		}
+	}
+	if ( ! function_exists( 'sanitize_key' ) ) {
+		function sanitize_key( $k ) { // phpcs:ignore
+			return preg_replace( '/[^a-z0-9_\-]/', '', strtolower( (string) $k ) );
+		}
+	}
+	if ( ! function_exists( 'sanitize_text_field' ) ) {
+		function sanitize_text_field( $t ) { // phpcs:ignore
+			return trim( preg_replace( '/[\r\n\t ]+/', ' ', strip_tags( (string) $t ) ) );
+		}
+	}
+	if ( ! function_exists( 'wp_unslash' ) ) {
+		function wp_unslash( $v ) { // phpcs:ignore
+			return is_string( $v ) ? stripslashes( $v ) : $v;
+		}
+	}
+	if ( ! function_exists( 'absint' ) ) {
+		function absint( $v ) { // phpcs:ignore
+			return abs( (int) $v );
+		}
+	}
+	if ( ! function_exists( 'wp_salt' ) ) {
+		function wp_salt( $s = 'auth' ) { // phpcs:ignore
+			return 'sal-de-teste-' . $s;
+		}
+	}
+	if ( ! function_exists( 'wp_hash' ) ) {
+		function wp_hash( $dado, $s = 'auth', $algo = 'md5' ) { // phpcs:ignore
+			return hash_hmac( $algo, $dado, wp_salt( $s ) );
+		}
+	}
+	if ( ! function_exists( 'remove_accents' ) ) {
+		function remove_accents( $t ) { // phpcs:ignore
+			$de   = array( 'á', 'à', 'â', 'ã', 'ä', 'é', 'è', 'ê', 'ë', 'í', 'ì', 'î', 'ï', 'ó', 'ò', 'ô', 'õ', 'ö', 'ú', 'ù', 'û', 'ü', 'ç', 'ñ', 'Á', 'À', 'Â', 'Ã', 'É', 'Ê', 'Í', 'Ó', 'Ô', 'Õ', 'Ú', 'Ç' );
+			$para = array( 'a', 'a', 'a', 'a', 'a', 'e', 'e', 'e', 'e', 'i', 'i', 'i', 'i', 'o', 'o', 'o', 'o', 'o', 'u', 'u', 'u', 'u', 'c', 'n', 'A', 'A', 'A', 'A', 'E', 'E', 'I', 'O', 'O', 'O', 'U', 'C' );
+			return str_replace( $de, $para, (string) $t );
+		}
+	}
+	if ( ! function_exists( 'is_admin' ) ) {
+		function is_admin() { // phpcs:ignore
+			return (bool) $GLOBALS['cl_t']['admin'];
+		}
+	}
+	if ( ! function_exists( 'get_current_user_id' ) ) {
+		function get_current_user_id() { // phpcs:ignore
+			return (int) $GLOBALS['cl_t']['usuario'];
+		}
+	}
+	if ( ! function_exists( 'wp_get_current_user' ) ) {
+		function wp_get_current_user() { // phpcs:ignore
+			return (object) array(
+				'ID'    => (int) $GLOBALS['cl_t']['usuario'],
+				'roles' => $GLOBALS['cl_t']['papeis'],
+			);
+		}
+	}
+	if ( ! function_exists( 'current_user_can' ) ) {
+		function current_user_can( $cap ) { // phpcs:ignore
+			return ! empty( $GLOBALS['cl_t']['pode'][ $cap ] );
+		}
+	}
+	if ( ! function_exists( 'get_theme_support' ) ) {
+		function get_theme_support( $f ) { // phpcs:ignore
+			return $GLOBALS['cl_t']['suporte'][ $f ] ?? false;
+		}
+	}
+	if ( ! function_exists( 'wp_strip_all_tags' ) ) {
+		function wp_strip_all_tags( $t ) { // phpcs:ignore
+			return trim( strip_tags( (string) $t ) );
+		}
+	}
+	if ( ! function_exists( 'strip_shortcodes' ) ) {
+		function strip_shortcodes( $t ) { // phpcs:ignore
+			return preg_replace( '/\[[^\]]*\]/', '', (string) $t );
+		}
+	}
+	if ( ! function_exists( 'is_user_logged_in' ) ) {
+		function is_user_logged_in() { // phpcs:ignore
+			return (int) $GLOBALS['cl_t']['usuario'] > 0;
+		}
+	}
+	if ( ! function_exists( 'wp_schedule_single_event' ) ) {
+		function wp_schedule_single_event( $quando, $gancho, $args = array() ) { // phpcs:ignore
+			$GLOBALS['cl_t']['agendados'][] = array( $gancho, $args );
+			return true;
+		}
+	}
+	if ( ! function_exists( 'wp_schedule_event' ) ) {
+		function wp_schedule_event( $quando, $rec, $gancho, $args = array() ) { // phpcs:ignore
+			$GLOBALS['cl_t']['agendados'][] = array( $gancho, $rec );
+			return true;
+		}
+	}
+	if ( ! function_exists( 'wp_next_scheduled' ) ) {
+		function wp_next_scheduled( $gancho, $args = array() ) { // phpcs:ignore
+			foreach ( $GLOBALS['cl_t']['agendados'] ?? array() as $a ) {
+				if ( $a[0] === $gancho ) {
+					return time();
+				}
+			}
+			return false;
+		}
+	}
+	if ( ! function_exists( 'wp_clear_scheduled_hook' ) ) {
+		function wp_clear_scheduled_hook( $g ) { // phpcs:ignore
+			return 0;
+		}
+	}
+	if ( ! function_exists( 'wp_unschedule_hook' ) ) {
+		function wp_unschedule_hook( $g ) { // phpcs:ignore
+			return 0;
+		}
+	}
+	if ( ! function_exists( 'wp_doing_ajax' ) ) {
+		function wp_doing_ajax() { // phpcs:ignore
+			return false;
+		}
+	}
+	if ( ! function_exists( 'wp_doing_cron' ) ) {
+		function wp_doing_cron() { // phpcs:ignore
+			return false;
+		}
+	}
+}
+
+if ( ! function_exists( 'wp_parse_url' ) ) {
+	function wp_parse_url( $url, $componente = -1 ) { return parse_url( (string) $url, $componente ); } // phpcs:ignore
+}
+if ( ! function_exists( 'trailingslashit' ) ) {
+	function trailingslashit( $v ) { return rtrim( (string) $v, '/\\' ) . '/'; } // phpcs:ignore
+}
+if ( ! function_exists( 'untrailingslashit' ) ) {
+	function untrailingslashit( $v ) { return rtrim( (string) $v, '/\\' ); } // phpcs:ignore
 }
 
 /* $wpdb falso ---------------------------------------------------------------- */
@@ -422,6 +540,7 @@ $GLOBALS['wpdb'] = new CL_Teste_Wpdb();
 $GLOBALS['cl_falhas'] = 0;
 $GLOBALS['cl_total']  = 0;
 
+if ( ! function_exists( 'confere' ) ) {
 /**
  * Compara obtido e esperado (===).
  *
@@ -445,4 +564,5 @@ function confere( $nome, $obtido, $esperado ) {
 function cl_teste_fim( $nome ) {
 	echo "{$nome}: " . ( $GLOBALS['cl_total'] - $GLOBALS['cl_falhas'] ) . '/' . $GLOBALS['cl_total'] . " casos\n";
 	exit( $GLOBALS['cl_falhas'] ? 1 : 0 );
+}
 }
