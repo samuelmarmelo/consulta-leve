@@ -1,0 +1,22 @@
+# Chaves e segredos nunca entram no repositório.
+*.pem
+*.key
+.env
+.env.*
+*.local.json
+
+# Ferramentas e saídas locais.
+dist/
+node_modules/
+tools/local/.cli/
+tools/local/.logs/
+
+# Worktrees de agentes.
+.claude/worktrees/
+.claude/settings.local.json
+
+# Sistema e editores.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
