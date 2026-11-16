@@ -16,11 +16,22 @@ if ( ! function_exists( 'consulta_leve_contar' ) ) {
 	/**
 	 * Quantos posts a consulta acharia.
 	 *
+	 * Escopo automático (''): `publico` só quando a consulta conta apenas posts
+	 * publicados (`post_status => 'publish'`, sem `perm`); qualquer outro
+	 * status, ou status ausente (o WordPress soma privados para quem pode
+	 * ler), conta separado por usuário.
+	 *
 	 * @param array  $args   Argumentos de WP_Query (paginação ignorada).
-	 * @param string $escopo publico ou usuario (consulta que depende de quem vê).
+	 * @param string $escopo '' (automático), publico ou usuario.
 	 * @return int
 	 */
-	function consulta_leve_contar( array $args, string $escopo = 'publico' ): int {
+	function consulta_leve_contar( array $args, string $escopo = '' ): int {
+		if ( 'publico' !== $escopo && 'usuario' !== $escopo ) {
+			$status = $args['post_status'] ?? null;
+			$so_pub = 'publish' === $status || array( 'publish' ) === $status;
+			$escopo = $so_pub && empty( $args['perm'] ) ? 'publico' : 'usuario';
+		}
+
 		unset( $args['paged'], $args['offset'], $args['posts_per_page'], $args['nopaging'], $args['numberposts'], $args['orderby'], $args['order'] );
 		ksort( $args );
 

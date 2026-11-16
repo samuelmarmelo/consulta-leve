@@ -188,9 +188,10 @@ Chave composta `(post_date, ID)` ou `(ID)`, sem OFFSET:
 
 ### 5.4 Contagem (`contagem.php`)
 
-`consulta_leve_contar( array $args, string $escopo = 'publico' )`: perfil
+`consulta_leve_contar( array $args, string $escopo = '' )`: perfil
 `contagem`, `found_posts` guardado no cache versionado (dependência
-`posts`). `consulta_leve_contar_status( $tipo )`: `wp_count_posts()` no
+`posts`). Escopo automático: `publico` só para `post_status => 'publish'`
+sem `perm`; o resto conta por usuário. `consulta_leve_contar_status( $tipo )`: `wp_count_posts()` no
 mesmo cache.
 
 ### 5.5 Lotes (`lotes.php`)
@@ -223,7 +224,8 @@ para continuar depois. Opção `adiar_contagem` liga
   sempre um memo por requisição (`static`).
 - `ttl` (padrão `cache_ttl`). `false`/`null` calculado não é guardado.
 - `consulta_leve_cache_tocar( $grupo )` muda a versão do grupo (uma opção
-  `consulta_leve_cache_versoes`, autoload desligado). Chaves velhas param
+  `consulta_leve_cv_<grupo>` por grupo, autoload desligado: invalidações
+  simultâneas de grupos diferentes não se sobrescrevem). Chaves velhas param
   de ser lidas e expiram sozinhas: nunca varrer `wp_options`.
 - Correria (muitos pedidos ao mesmo tempo com o cache vazio): opção
   `travar => true` usa a trava de 3.4 e serve a última cópia boa
@@ -269,8 +271,11 @@ resultado `'1'`/`'0'` em `consulta_leve_busca_fulltext`. `texto_norm`
 
 Fila por requisição em `save_post`, `deleted_post`, `trashed_post`,
 `untrashed_post`, `set_object_terms`, `added/updated/deleted_post_meta` (só
-chaves de `indice_metas`), gravada no `shutdown` com `REPLACE INTO`. Fila
-acima de 500 vira reconstrução. Post que saiu dos tipos ou foi apagado sai
+chaves de `indice_metas`), gravada no `shutdown` com `REPLACE INTO`: até 50
+posts na própria requisição, o resto em `consulta_leve_busca_pendentes`,
+gravado pelo cron em lotes de 200. Mais de 5000 pendentes vira
+reconstrução. Rascunho, privado e agendado só voltam em
+`consulta_leve_busca_ids` para quem tem `edit_others_posts`. Post que saiu dos tipos ou foi apagado sai
 da tabela (é cache: o post continua a fonte da verdade). Cada gravação
 muda a versão do grupo de cache `busca`.
 
@@ -310,9 +315,14 @@ Em `pre_get_posts` (prioridade 5), consulta com `s` no site (não painel):
 - `post_search_columns` (WP 6.2+): interseção com a escolha de
   `busca_colunas`; nunca acrescenta coluna;
 - `wp_robots`: `noindex, follow` em `is_search()` (`busca_noindex`);
-- limite por IP (`busca_limite` por minuto): passou, resposta 429 com
-  `Retry-After: 60`. IP = `REMOTE_ADDR` (filtro
-  `consulta_leve_ip` para proxy confiável).
+- limite por minuto (`busca_limite`), contado no `pre_get_posts` da
+  consulta principal, antes de ir ao banco: passou, a consulta sai vazia e
+  a página responde 429 com `Retry-After: 60`. Conta por usuário logado
+  (quem tem `manage_options` fica fora) ou por IP do visitante, com IPv6
+  agrupado por /64. IP = `REMOTE_ADDR`; atrás de CDN ou proxy, o site deve
+  informar o IP real pelo filtro `consulta_leve_ip`. Sem cache de objetos
+  externo, um transient por balde e minuto (até 1000 pessoas; as demais
+  dividem um contador com dez vezes o limite).
 
 ### 8.2 Componente de busca rápida
 
@@ -334,7 +344,8 @@ o shortcode imprime um formulário de busca comum (SafeWidget).
   colunas `post_title`, cursor.
 - Cache versionado 60 s; `ETag` sha256 do corpo; `If-None-Match` igual
   devolve 304 sem corpo; `Cache-Control: public, max-age=60`.
-- Limite `rest_por_minuto` por IP: 429 `consulta_leve_limite`.
+- Limite `rest_por_minuto` por pessoa e teto do site de 20 vezes esse
+  valor por minuto: 429 `consulta_leve_limite`.
 - Erros: `WP_Error( 'consulta_leve_<motivo>', texto, array( 'status' => N ) )`.
 
 `consulta_leve_rest_etag( WP_REST_Response $r, WP_REST_Request $q, string $cache_control )`

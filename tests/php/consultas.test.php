@@ -206,6 +206,19 @@ confere( 'contagem guardada', consulta_leve_contar( array( 'paged' => 9, 'post_t
 confere( 'uma consulta só', count( $GLOBALS['cl_t']['wp_query'] ), 1 );
 confere( 'perfil contagem usado', $GLOBALS['cl_t']['wp_query'][0]['no_found_rows'], false );
 
+// Escopo automático: sem post_status, cada usuário conta separado.
+$GLOBALS['cl_t']['wp_query'] = array();
+$GLOBALS['cl_t']['usuario']  = 7;
+consulta_leve_contar( array( 'post_type' => 'nota' ) );
+$GLOBALS['cl_t']['usuario'] = 8;
+consulta_leve_contar( array( 'post_type' => 'nota' ) );
+confere( 'sem status: contagem por usuário', count( $GLOBALS['cl_t']['wp_query'] ), 2 );
+consulta_leve_contar( array( 'post_type' => 'nota', 'post_status' => 'publish' ) );
+$GLOBALS['cl_t']['usuario'] = 7;
+consulta_leve_contar( array( 'post_type' => 'nota', 'post_status' => 'publish' ) );
+confere( 'só publicados: contagem comum', count( $GLOBALS['cl_t']['wp_query'] ), 3 );
+$GLOBALS['cl_t']['usuario'] = 0;
+
 $GLOBALS['cl_t']['contou_status'] = 0;
 confere( 'status contados', consulta_leve_contar_status( 'post' ), array( 'publish' => 12, 'draft' => 3 ) );
 consulta_leve_contar_status( 'post' );

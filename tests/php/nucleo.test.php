@@ -144,7 +144,7 @@ $memo   = array();
 $contas = 0;
 consulta_leve_lembrar( 'dep', 'k', $calc, array( 'deps' => array( 'posts' ) ) );
 do_action( 'clean_post_cache', 10 );
-confere( 'versão só grava no shutdown', isset( $GLOBALS['cl_t']['opcoes']['consulta_leve_cache_versoes']['dep_posts'] ), false );
+confere( 'versão só grava no shutdown', isset( $GLOBALS['cl_t']['opcoes']['consulta_leve_cv_dep_posts'] ), false );
 do_action( 'shutdown' );
 $memo = array();
 consulta_leve_lembrar( 'dep', 'k', $calc, array( 'deps' => array( 'posts' ) ) );

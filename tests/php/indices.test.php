@@ -55,6 +55,7 @@ $GLOBALS['cl_t']['sql'] = array(
 		return (string) ( $GLOBALS['cl_t_linhas'] ?? 5000 );
 	},
 	'/ALGORITHM=INPLACE/'             => static function () {
+		$GLOBALS['wpdb']->last_error = $GLOBALS['cl_t_erro_online'] ?? 'ALGORITHM=INPLACE is not supported for this operation';
 		return false; // Banco recusa o modo online.
 	},
 	'/ADD INDEX `cl_meta_post_chave`/' => static function () {
@@ -69,6 +70,14 @@ confere( 'cria com reserva sem modo online', consulta_leve_indices_criar( 'meta_
 confere( 'criar de novo: já criado', consulta_leve_indices_criar( 'meta_post_chave' ), 'criado' );
 $reg = consulta_leve_registro();
 confere( 'registro guarda a ação', array( $reg[0]['acao'], $reg[0]['alvo'], $reg[0]['resultado'] ), array( 'indice_criar', 'meta_post_chave', 'ok' ) );
+
+// Erro que não é das cláusulas online (tempo de trava): para, sem DDL bloqueante.
+$GLOBALS['cl_t_erro_online'] = 'Lock wait timeout exceeded';
+$antes                       = count( $GLOBALS['cl_t']['consultas'] );
+confere( 'tempo de trava não repete sem modo online', consulta_leve_indices_criar( 'posts_autor_tipo' ), 'banco' );
+$depois = array_slice( $GLOBALS['cl_t']['consultas'], $antes );
+confere( 'nenhum ALTER sem ALGORITHM depois do erro', count( preg_grep( '/ADD INDEX `cl_posts_autor_tipo` \([^)]*\)$/', $depois ) ), 0 );
+unset( $GLOBALS['cl_t_erro_online'] );
 
 $GLOBALS['cl_t_linhas'] = 2000000;
 confere( 'tabela grande pede confirmação', consulta_leve_indices_criar( 'meta_chave_valor' ), 'confirmar' );

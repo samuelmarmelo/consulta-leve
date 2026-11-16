@@ -120,12 +120,38 @@ if ( ! function_exists( 'consulta_leve_modulos' ) ) {
 	}
 
 	/**
+	 * O núcleo carregou (funções de que todos os módulos dependem)?
+	 *
+	 * @return bool
+	 */
+	function consulta_leve_nucleo_pronto(): bool {
+		foreach ( array( 'consulta_leve_opcao', 'consulta_leve_ativo', 'consulta_leve_travar', 'consulta_leve_lembrar' ) as $funcao ) {
+			if ( ! function_exists( $funcao ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
 	 * Carrega os módulos e avisa (`consulta_leve_carregado`).
 	 *
 	 * @return void
 	 */
 	function consulta_leve_carregar(): void {
+		$avisado = false;
+
 		foreach ( consulta_leve_modulos() as $modulo ) {
+			// Sem o núcleo (configuração, coexistência, trava e cache), os demais
+			// módulos não carregam: melhor parado que fatal em toda página.
+			if ( 0 !== strpos( $modulo, 'nucleo/' ) && ! consulta_leve_nucleo_pronto() ) {
+				if ( ! $avisado ) {
+					$avisado = true;
+					do_action( 'consulta_leve_falha', 'nucleo', new \RuntimeException( 'núcleo incompleto: módulos parados' ) );
+				}
+				continue;
+			}
 			consulta_leve_carregar_arquivo( $modulo );
 		}
 

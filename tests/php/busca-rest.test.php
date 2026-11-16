@@ -137,6 +137,55 @@ consulta_leve_limite_bateu( 'ext', 1 );
 confere( 'cache externo atômico', consulta_leve_limite_bateu( 'ext', 1 ), true );
 $GLOBALS['cl_t']['externo'] = false;
 
+/* Limite: quem conta e teto de pessoas ---------------------------------------- */
+
+$_SERVER['REMOTE_ADDR'] = '2001:db8:aaaa:bbbb::1';
+consulta_leve_limite_bateu( 'v6', 1 );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:aaaa:bbbb:ffff::9';
+confere( 'IPv6 do mesmo /64 divide o limite', consulta_leve_limite_bateu( 'v6', 1 ), true );
+$_SERVER['REMOTE_ADDR'] = '2001:db8:aaaa:cccc::1';
+confere( 'outro /64 tem limite próprio', consulta_leve_limite_bateu( 'v6', 1 ), false );
+
+$_SERVER['REMOTE_ADDR']     = '192.0.2.50';
+consulta_leve_limite_bateu( 'logado', 1 );
+$GLOBALS['cl_t']['usuario'] = 42;
+confere( 'logado conta pelo ID, não pelo IP', consulta_leve_limite_bateu( 'logado', 1 ), false );
+confere( 'logado também tem limite', consulta_leve_limite_bateu( 'logado', 1 ), true );
+$GLOBALS['cl_t']['usuario'] = 0;
+
+for ( $i = 0; $i < 1000; $i++ ) {
+	$_SERVER['REMOTE_ADDR'] = '10.0.' . intdiv( $i, 250 ) . '.' . ( $i % 250 );
+	consulta_leve_limite_bateu( 'muitos', 5 );
+}
+$linhas = 0;
+foreach ( array_keys( $GLOBALS['cl_t']['transients'] ) as $k ) {
+	if ( 0 === strpos( $k, 'consulta_leve_rl_' . substr( md5( 'muitos' ), 0, 12 ) ) ) {
+		++$linhas;
+	}
+}
+confere( 'mil IPs, um transient só', $linhas, 1 );
+$_SERVER['REMOTE_ADDR'] = '10.9.9.9';
+$bateu                  = false;
+for ( $i = 0; $i < 50; $i++ ) {
+	$bateu = consulta_leve_limite_bateu( 'muitos', 5 );
+}
+confere( 'acima de mil, contador comum com 10x o limite', $bateu, false );
+confere( 'contador comum também bate', consulta_leve_limite_bateu( 'muitos', 5 ), true );
+
+// Busca principal acima do limite: vazia antes de ir ao banco.
+consulta_leve_config_gravar( array( 'busca_limite' => 1 ) );
+$_SERVER['REMOTE_ADDR'] = '198.51.100.77';
+consulta_leve_limite_bateu( 'busca', 1 );
+class CL_QP extends WP_Query { // phpcs:ignore
+	public function is_main_query() {
+		return true;
+	}
+}
+$q = new CL_QP( array( 's' => 'casa azul' ) );
+consulta_leve_busca_pre_get_posts( $q );
+confere( 'acima do limite: consulta vazia', $q->get( 'post__in' ), array( 0 ) );
+confere( 'acima do limite: página 429 marcada', ! empty( $GLOBALS['consulta_leve_busca_429'] ), true );
+
 /* Shortcode ----------------------------------------------------------------- */
 
 $html = consulta_leve_busca_shortcode( array( 'tipos' => 'post, <x>page' ) );
@@ -145,6 +194,7 @@ confere( 'formulário funciona sem script', false !== strpos( $html, 'name="s"' 
 consulta_leve_config_gravar( array( 'rest' => true ) );
 $html = consulta_leve_busca_shortcode( array( 'tipos' => 'post,<x>page', 'limite' => 99 ) );
 confere( 'com REST: busca rápida', false !== strpos( $html, 'data-cl-busca="https://exemplo.test/wp-json/consulta-leve/v1/busca"' ), true );
+confere( 'mínimo do componente nunca abaixo de 2', false !== strpos( $html, 'data-cl-min="2"' ), true );
 confere( 'tipos saneados', false !== strpos( $html, 'data-cl-tipos="post,xpage"' ), true );
 confere( 'limite preso a 20', false !== strpos( $html, 'data-cl-limite="20"' ), true );
 confere( 'script só quando usado', $GLOBALS['cl_t']['enfileirados'], array( 'consulta-leve-busca', 'consulta-leve-busca' ) );

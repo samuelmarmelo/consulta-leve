@@ -147,7 +147,10 @@ if ( ! function_exists( 'consulta_leve_rest_etag_bate' ) ) {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	function consulta_leve_rest_busca( $pedido ) {
-		if ( consulta_leve_limite_bateu( 'rest', (int) consulta_leve_opcao( 'rest_por_minuto' ) ) ) {
+		$por_minuto = (int) consulta_leve_opcao( 'rest_por_minuto' );
+		// Limite por pessoa e teto do site inteiro (vinte pessoas no limite):
+		// trocar de IP não multiplica as consultas ao banco.
+		if ( consulta_leve_limite_bateu( 'rest', $por_minuto ) || consulta_leve_limite_bateu( 'rest_global', $por_minuto * 20, true ) ) {
 			$erro = new \WP_REST_Response(
 				array(
 					'code'    => 'consulta_leve_limite',

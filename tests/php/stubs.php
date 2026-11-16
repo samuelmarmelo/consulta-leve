@@ -412,6 +412,9 @@ cl_teste_reset();
 	}
 }
 
+if ( ! function_exists( 'wp_rand' ) ) {
+	function wp_rand( $min = 0, $max = 0 ) { return random_int( (int) $min, (int) $max ); } // phpcs:ignore
+}
 if ( ! function_exists( 'wp_parse_url' ) ) {
 	function wp_parse_url( $url, $componente = -1 ) { return parse_url( (string) $url, $componente ); } // phpcs:ignore
 }

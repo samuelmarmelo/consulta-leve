@@ -36,7 +36,7 @@
     var aviso = form.querySelector('.cl-busca__aviso');
     if (!endpoint || !campo || !lista || !aviso || !window.fetch || !window.AbortController) return;
 
-    var minimo = Math.max(1, parseInt(form.getAttribute('data-cl-min'), 10) || 2);
+    var minimo = Math.max(2, parseInt(form.getAttribute('data-cl-min'), 10) || 2);
     var tipos = form.getAttribute('data-cl-tipos') || '';
     var limite = parseInt(form.getAttribute('data-cl-limite'), 10) || 8;
     var timer = 0;
