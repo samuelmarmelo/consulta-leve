@@ -44,6 +44,10 @@ pelas versões assinadas (ver `docs/ATUALIZADOR.md`).
   público, então uma chamada anônima pode contar como sinal de vida; ela
   também roda os eventos vencidos, e sem sinal por 60 minutos o WP-Cron das
   visitas volta.
+- **Cabeçalhos de segurança só por escolha.** Todos desligados por padrão,
+  valores fixos no código, nunca trocam cabeçalho existente nem tocam
+  arquivo do servidor. HSTS com subdomínios e preload exige confirmação.
+  Não alcançam arquivo estático nem cache que não passa pelo PHP.
 - **Nenhuma chamada externa** além do atualizador, que lê o GitHub sem
   token e sem o endereço do site.
 

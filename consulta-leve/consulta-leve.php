@@ -67,6 +67,7 @@ if ( ! function_exists( 'consulta_leve_modulos' ) ) {
 			'atualizacao/chaves.php',
 			'atualizacao/atualizador.php',
 			'cron/cron.php',
+			'seguranca/cabecalhos.php',
 		);
 		if ( is_admin() ) {
 			$modulos[] = 'admin/admin.php';

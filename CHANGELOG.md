@@ -12,6 +12,10 @@ Versões: [SemVer](https://semver.org/lang/pt-BR/).
   60 minutos.
 - Diagnóstico: `cron_origem` e `cron_estado` dizem se `DISABLE_WP_CRON` veio
   do `wp-config.php` ou deste plugin; alerta de cron externo parado.
+- Cabeçalhos de segurança opcionais, todos desligados por padrão e enviados
+  pelo PHP: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`,
+  `Content-Security-Policy: upgrade-insecure-requests` e HSTS. Cabeçalho já
+  presente nunca é trocado; o tema dispensa com `cabecalhos`.
 
 ### Alterado
 - O formulário geral do painel não muda chaves com formulário próprio.

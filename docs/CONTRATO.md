@@ -85,9 +85,14 @@ de chaves, tipos e limites). Chaves:
 | `monitor` | bool | true | contador na barra do admin (10.3) |
 | `cache_ttl` | int 30 a 86400 | 600 | TTL padrão do cache (6) |
 | `cron_real` | bool | false | desliga o WP-Cron das visitas com cron externo vivo (10.4) |
+| `cab_nosniff` | bool | false | `X-Content-Type-Options` (15.1) |
+| `cab_referrer` | bool | false | `Referrer-Policy` (15.1) |
+| `cab_frame` | bool | false | `X-Frame-Options` (15.1) |
+| `cab_upgrade` | bool | false | `Content-Security-Policy: upgrade-insecure-requests` (15.1) |
+| `cab_hsts` | `nao` ou `ano` ou `ano_preload` | `nao` | `Strict-Transport-Security` (15.1) |
 
 `consulta_leve_config_chaves_proprias()` lista as chaves com formulário e
-conferência próprios (`cron_real`): o formulário geral do painel nunca as
+conferência próprios (`cron_real` e as `cab_*`): o formulário geral do painel nunca as
 muda, nem por campo forjado, nem por caixa ausente.
 `consulta_leve_config_do_formulario()` monta os valores do formulário geral.
 
@@ -123,6 +128,7 @@ aplicar duas vezes:
 | Perfil | cabeçalho próprio `X-Consulta-Leve-Perfil`; `SAVEQUERIES` só se ninguém definiu |
 | Monitor | some quando o Query Monitor está ativo |
 | Cron real | `DISABLE_WP_CRON` já definida, com qualquer valor: o plugin não interfere; cópia embutida nunca define |
+| Cabeçalhos de segurança | cabeçalho já presente na resposta (sem diferenciar maiúsculas) nunca é trocado nem repetido |
 
 Dispensa explícita (o tema diz "este eu já faço"):
 
@@ -139,7 +145,7 @@ ativo) e `indice_busca` para os tipos que o CRM interno já indexa
 
 Métodos que aceitam dispensa: `argumentos`, `teto_global`,
 `primar_opcoes`, `busca`, `busca_noindex`, `busca_limite`,
-`indice_busca`, `rest`, `monitor`, `perfil`.
+`indice_busca`, `rest`, `monitor`, `perfil`, `cabecalhos`.
 
 ## 5. Consultas (`consultas/`)
 
@@ -475,7 +481,7 @@ Nunca automáticos. Lista fechada de candidatos, cada um com tabela, nome
 ## 12. Painel (`admin/admin.php`)
 
 Ferramentas, Consulta Leve (`manage_options`), abas: Diagnóstico, Índices,
-Busca, Configurações (com a seção Cron real, de formulário próprio).
+Busca, Cabeçalhos (formulário próprio), Configurações (com a seção Cron real, de formulário próprio).
 Formulários por `admin-post` com nonce próprio por
 ação; texto de usuário escapado; mensagens por código curto (nada da URL
 vira texto). Estilo do admin do WordPress (`widefat`, `notice`), sem
@@ -502,6 +508,43 @@ automática só depois de 48 h, sem token.
 - Nenhum segredo no repositório; nenhuma chamada externa além do
   atualizador.
 - Sem `eval`, sem `base64_decode`, sem drop-in, sem mexer em `wp-config.php`.
+
+### 15.1 Cabeçalhos de segurança (`seguranca/cabecalhos.php`)
+
+Opcionais, todos desligados por padrão, enviados pelo PHP na ação
+`send_headers` (prioridade 999), só no site (nunca no painel). Nada de
+`.htaccess`: uma linha `Header` sem mod_headers derruba o site com erro 500,
+no Nginx o arquivo não faz nada, e o plugin não toca arquivo do servidor.
+
+| Chave | Cabeçalho | Condição |
+|---|---|---|
+| `cab_nosniff` | `X-Content-Type-Options: nosniff` | |
+| `cab_referrer` | `Referrer-Policy: strict-origin-when-cross-origin` | |
+| `cab_frame` | `X-Frame-Options: SAMEORIGIN` | fora de `is_embed()` e da prévia do Personalizar |
+| `cab_upgrade` | `Content-Security-Policy: upgrade-insecure-requests` | `is_ssl()` e nenhuma `Content-Security-Policy` na resposta |
+| `cab_hsts` = `ano` | `Strict-Transport-Security: max-age=31536000` | `is_ssl()` |
+| `cab_hsts` = `ano_preload` | `... max-age=31536000; includeSubDomains; preload` | `is_ssl()` e confirmação ao salvar |
+
+- Regra pura: `consulta_leve_cabecalhos_lista( $config, $ssl, $existentes, $em_quadro )`
+  devolve `nome => valor`. Cabeçalho de `headers_list()` com o mesmo nome,
+  sem diferenciar maiúsculas, tira o item da lista.
+- Dispensa: método `cabecalhos` (seção 4).
+- Aba Cabeçalhos com nonce próprio. Passar para `ano_preload` exige a caixa
+  de confirmação; sem ela, o HSTS fica como estava e o resto é salvo.
+  Afeta todos os subdomínios e é difícil de desfazer.
+- **Fora de propósito:** `X-XSS-Protection` (obsoleto; os navegadores atuais
+  o ignoram e nos antigos ele abria falhas) e
+  `Permissions-Policy: interest-cohort` (o recurso FLoC foi removido dos
+  navegadores).
+- **Limites.** Arquivo estático, página servida por cache que não passa pelo
+  PHP, `wp-login.php`, painel, REST e `admin-ajax.php` não recebem os
+  cabeçalhos. Cache de página inteira pode guardar a resposta sem eles:
+  limpe o cache depois de ligar. O PHP não enxerga cabeçalho posto pelo
+  servidor ou pela CDN (pode sair repetido: ligue num lugar só). Atrás de
+  proxy que termina o HTTPS, `is_ssl()` precisa estar certo no site.
+  Desligar o HSTS só para de enviar: o navegador guarda a regra até o fim
+  do prazo. Em multisite, a configuração é de cada site, mas o HSTS com
+  subdomínios alcança os outros sites do domínio.
 
 ## 16. Testes
 

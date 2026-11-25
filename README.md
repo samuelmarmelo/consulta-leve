@@ -53,6 +53,7 @@ regras num plugin genérico:
 | Índices em `wp_posts` e `wp_postmeta` | manual | só com clique, depois do EXPLAIN; nunca duplica índice existente |
 | Perfil de consultas | por cabeçalho | consultas por forma, N+1, EXPLAIN, quem chamou |
 | Cron real | desligado | com cron da hospedagem vivo, as visitas não disparam o WP-Cron; sem editar o `wp-config.php`, volta sozinho |
+| Cabeçalhos de segurança | desligado | `nosniff`, `Referrer-Policy`, `X-Frame-Options`, `upgrade-insecure-requests` e HSTS pelo PHP, sem trocar o que já existe |
 | Diagnóstico do banco | ligado | cache de objetos, autoload, tabelas, revisões, cron, OPcache |
 
 Detalhes, formatos e ganchos: [`docs/CONTRATO.md`](docs/CONTRATO.md).
@@ -90,6 +91,15 @@ Se a tarefa parar por 60 minutos, ou se o plugin for desativado, o WP-Cron
 das visitas volta sozinho. Em multisite, cada site precisa da própria
 tarefa. Vale só para o plugin instalado como plugin próprio; se o
 `wp-config.php` já define `DISABLE_WP_CRON`, nada muda.
+
+## Cabeçalhos de segurança
+
+Aba Cabeçalhos, cada um por sua caixa. Valem para as páginas geradas pelo
+PHP: arquivo estático e cache de página que não passa pelo PHP ficam de
+fora. O que o servidor ou a CDN já envia o PHP não enxerga; ligue num lugar
+só. HSTS com subdomínios e preload pede confirmação: alcança todos os
+subdomínios e é difícil de desfazer. `X-XSS-Protection` e
+`interest-cohort` ficam de fora por serem obsoletos.
 
 ## Para quem desenvolve o tema
 
