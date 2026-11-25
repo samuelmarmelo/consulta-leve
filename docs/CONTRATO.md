@@ -401,7 +401,8 @@ OPcache, `DISABLE_WP_CRON` (`cron_desligado`, bool; `cron_origem`: `''`,
 `postmeta`, `options`, `comments`, `termmeta`, `usermeta`, revisões,
 rascunhos automáticos, lixeira, transients vencidos, estado dos índices e
 da tabela de busca, e recomendações em texto. Cache de 5 min no painel,
-botão "Medir de novo".
+botão "Medir de novo". O estado do cron e as recomendações ficam fora do
+cache, porque o cron real vence sozinho (10.4).
 
 ### 10.3 Monitor (`diagnostico/monitor.php`)
 

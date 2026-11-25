@@ -256,9 +256,6 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 					'motor'           => consulta_leve_diag_motor(),
 					'cache'           => consulta_leve_diag_cache(),
 					'opcache'         => function_exists( 'opcache_get_status' ) && is_array( @opcache_get_status( false ) ), // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- API restrita avisa.
-					'cron_desligado'  => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
-					'cron_origem'     => function_exists( 'consulta_leve_cron_definido_por' ) ? consulta_leve_cron_definido_por() : ( defined( 'DISABLE_WP_CRON' ) ? 'wp_config' : '' ),
-					'cron_estado'     => function_exists( 'consulta_leve_cron_estado' ) ? consulta_leve_cron_estado( consulta_leve_cron_situacao() ) : '',
 					'revisoes_limite' => defined( 'WP_POST_REVISIONS' ) ? WP_POST_REVISIONS : true,
 					'autoload'        => consulta_leve_diag_autoload(),
 					'tabelas'         => consulta_leve_diag_tabelas(),
@@ -273,13 +270,22 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 					}
 				}
 
-				$d['recomendacoes'] = consulta_leve_diag_recomendacoes( $d );
-
 				return $d;
 			},
 			array( 'ttl' => 300 )
 		);
 
-		return is_array( $d ) ? $d : array();
+		if ( ! is_array( $d ) || ! $d ) {
+			return array();
+		}
+
+		// Fora do cache: o cron real vence sozinho e o painel não pode dizer que
+		// ele está ativo depois disso.
+		$d['cron_desligado'] = defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON;
+		$d['cron_origem']    = function_exists( 'consulta_leve_cron_definido_por' ) ? consulta_leve_cron_definido_por() : ( defined( 'DISABLE_WP_CRON' ) ? 'wp_config' : '' );
+		$d['cron_estado']    = function_exists( 'consulta_leve_cron_estado' ) ? consulta_leve_cron_estado( consulta_leve_cron_situacao() ) : '';
+		$d['recomendacoes']  = consulta_leve_diag_recomendacoes( $d );
+
+		return $d;
 	}
 }
