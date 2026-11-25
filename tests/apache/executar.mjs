@@ -348,8 +348,7 @@ async function todos() {
   // Controle negativo, sem o plugin escrever: as armadilhas quebram mesmo e o
   // teste enxerga repetição. Confere também as duas tabelas do mod_headers.
   await cenario('0', 'as armadilhas dos cenários funcionam', async (antes) => {
-    const linha = (tabela) => Buffer.concat([Buffer.from(`Header ${tabela} set X-Frame-Options "SAMEORIGIN"
-`), antes]);
+    const linha = (tabela) => Buffer.concat([Buffer.from(`Header ${tabela} set X-Frame-Options "SAMEORIGIN"\n`), antes]);
     const vezes = async (tabela) => {
       escrever(linha(tabela));
       return ((await home()).cab['x-frame-options'] || []).length;
@@ -357,12 +356,7 @@ async function todos() {
     const [sempre, sucesso] = [await vezes('always'), await vezes('onsuccess')];
     ok(variante === 'fpm' ? sempre === 1 && sucesso === 2 : sempre === 2 && sucesso === 1, `cabeçalho do PHP mais o do servidor: always ${sempre} vez(es), onsuccess ${sucesso} vez(es)`);
 
-    const bloco = Buffer.from('# BEGIN Consulta Leve
-<IfModule mod_headers.c>
-Header set X-Content-Type-Options "nosniff"
-</IfModule>
-# END Consulta Leve
-');
+    const bloco = Buffer.from('# BEGIN Consulta Leve\n<IfModule mod_headers.c>\nHeader set X-Content-Type-Options "nosniff"\n</IfModule>\n# END Consulta Leve\n');
     const comBloco = Buffer.concat([bloco, antes]);
     escrever(comBloco);
     const visto = await gif();
