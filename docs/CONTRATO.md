@@ -512,7 +512,8 @@ automática só depois de 48 h, sem token.
   atualizador.
 - Sem `eval`, sem `base64_decode`, sem drop-in, sem mexer em `wp-config.php`.
 - Arquivo do servidor: só o `.htaccess`, só por clique, só o bloco próprio
-  (15.2). Nenhum outro.
+  (15.2), depois de um ensaio numa pasta temporária própria de uploads.
+  Nenhum outro.
 
 ### 15.1 Cabeçalhos de segurança (`seguranca/cabecalhos.php`)
 
@@ -604,7 +605,9 @@ cabeçalhos; as geradas pelo WordPress saem com eles.
 `SERVER_SOFTWARE`), `bloqueado` (`DISALLOW_FILE_MODS`), `dispensado` (4),
 `sem_escolha` (nenhuma `cab_*`), `caminho` (a pasta precisa ser a do
 WordPress ou uma acima dela), `link` (link simbólico), `nao_arquivo`,
-`tamanho` (acima de 128 KB), `sem_leitura`, `sem_escrita`. E o conteúdo:
+`tamanho` (acima de 128 KB), `sem_leitura`, `sem_escrita` (arquivo e pasta
+precisam de escrita), `ensaio_local` (uploads fora da pasta do WordPress, em
+outro endereço, sem escrita ou sem acesso pela web). E o conteúdo:
 `marcadores` (nosso marcador repetido, sem par, fora de ordem, escrito de
 outro jeito ou com outro marcador dentro), `marcador_wp` (`# BEGIN WordPress`
 repetido), `secao` (o ponto de entrada está dentro de um `<...>` aberto),
@@ -613,12 +616,36 @@ repetido), `secao` (o ponto de entrada está dentro de um `<...>` aberto),
 **Escrita.** Funções puras: `consulta_leve_htaccess_bloco()`,
 `consulta_leve_htaccess_com_bloco()` e `consulta_leve_htaccess_sem_bloco()`;
 tudo fora dos marcadores fica igual byte a byte, e a quebra de linha segue a
-do arquivo. Ordem: trava `htaccess` (3.4), leitura, respostas de base, cópia
-em `consulta_leve_htaccess_copia` (sem autoload, em hexadecimal com
-SHA-256, relida antes de seguir), estado `pendente`, nova conferência do
-hash (mudou no meio: `mudou`, nada é escrito) e escrita. Temporário e
-`rename` na mesma pasta quando o dono do arquivo continua o mesmo; senão, no
-próprio arquivo com `flock`, conferindo o hash com a trava na mão.
+do arquivo. Ordem: trava `htaccess` (3.4, 300 s; o pior caso são 12 pedidos de
+5 s), leitura, estado `pendente`, cópia em `consulta_leve_htaccess_copia` (sem
+autoload, em hexadecimal com SHA-256, relida antes de seguir), bloco antigo
+nosso fora (só ao mudar escolhas), ensaio, respostas de base e escrita. A cópia
+sai quando o estado fica conferido ou desfeito; só fica em `pendente` e com
+motivo `volta_*`.
+
+**Ensaio** (`seguranca/ensaio.php`). Antes de tocar o arquivo do site: pasta
+`consulta-leve-ensaio-<32 hex>` em uploads, com `ensaio.txt` e, conferido que
+ele abre pelo site (200 e o mesmo texto), um `.htaccess` com o bloco idêntico; e
+a subpasta `sonda`, com os mesmos nomes valendo `consulta-leve-sonda` na tabela
+`always` e o bloco depois. O primeiro tem de trazer cada cabeçalho uma vez; o
+segundo, só a sonda. Falhou: recusa, e o arquivo do site nem é aberto para
+escrita. A pasta sai sempre (nome no estado antes de criar; também no fim do
+processo e na próxima carga do painel), apagando só os quatro arquivos que o
+plugin criou nela; se não sair, recusa com `ensaio_sobra`. O ensaio não garante
+a raiz (um `AllowOverride` pode ser diferente por pasta): por isso a conferência
+abaixo continua.
+
+**Troca.** Só atômica: temporário na mesma pasta e `rename`, com dono, grupo e
+permissões iguais; não deu, `sem_escrita`, nunca escrita por cima. O arquivo
+original fica com `flock( LOCK_EX )` da comparação ao `rename` (a mesma trava do
+`insert_with_markers`); conteúdo ou arquivo diferente do lido, `mudou`; trava
+alheia por mais de 2 s, `ocupado`. Quem já tinha o arquivo aberto e escreveu no
+antigo depois do `rename` é percebido 0,2 s depois: a mudança dele volta para o
+lugar e a nossa é recusada (processo parado por mais tempo entre abrir e travar
+não é percebido). No Windows o arquivo é fechado logo antes do `rename`, porque
+ele não troca arquivo aberto. ACL e atributos estendidos não são conferidos. Arquivo que
+não existia nasce vazio, com criação exclusiva, e recebe o conteúdo pelo
+`rename`.
 
 **Conferência.** Por `wp_remote_get` ao próprio site, sem seguir
 redirecionamento, com endereço único. Antes de escrever: página inicial e
@@ -644,9 +671,10 @@ cópia (sem bloco nosso; arquivo que não existia é removido). Se alguém mexeu
 no meio, sai só o nosso bloco. Processo morto: `register_shutdown_function`
 desfaz; se nem isso rodou, a marca `pendente` é conferida no `admin_init`, no
 WP-CLI e no wp-cron.php chamado de fora, e desfeita quando a trava estiver
-livre. **Limite:** se o servidor matar o processo com o `.htaccess` gerando
-500, o painel não abre; o WP-CLI ou apagar o bloco à mão resolve. O estático
-é testado primeiro para essa janela durar um pedido.
+livre (até 5 minutos). **Limite:** com o ensaio, o arquivo do site só erra se a
+raiz aceitar menos que uploads; se nesse instante o processo for morto, o
+painel não abre e a volta é pelo WP-CLI ou à mão (apagar as linhas de
+`# BEGIN Consulta Leve` a `# END Consulta Leve`).
 
 **Estados** (opção `consulta_leve_htaccess`, com autoload; painel e
 diagnóstico): `desligado`, `pendente`, `ativo` (ativo e conferido) e
@@ -657,13 +685,17 @@ mesmo tipo (`servidor`); se não, o estado vira `recusado` e o PHP volta.
 
 **Desligar, mudar opções, desativar.** Salvar a aba com o bloco ativo
 reescreve e confere de novo; falhou, o bloco sai inteiro e o PHP volta a
-mandar. Desligar e desativar tiram só o nosso bloco. Nada disso toca outro
-marcador. Com `DISALLOW_FILE_MODS` o plugin não tira o bloco sozinho (exceto
+mandar. Desligar, desativar e desinstalar (`uninstall.php`) tiram só o nosso
+bloco; opções e tabelas ficam. Desativar insiste 3 s se a trava estiver
+ocupada; se o bloco ficar, registra e mostra o motivo e como tirar à mão (na
+volta à tela Plugins, ou aviso no WP-CLI; em outros meios, só o registro).
+Nada disso toca outro marcador. Com `DISALLOW_FILE_MODS` o plugin não tira o bloco sozinho (exceto
 uma escrita pendente dele mesmo): o painel explica. O bloco vale também para
 painel, `wp-login.php`, REST e arquivos: onde o núcleo já manda o cabeçalho,
 fica o do núcleo. Escolhas mudadas só pelo filtro `consulta_leve_config` não
 chegam ao arquivo. Registro: `htaccess`, `ligar`, `desligar`, `salvar`,
-`desativar`, `desfazer` ou `revisar`.
+`desativar`, `desinstalar`,
+`desfazer` ou `revisar`.
 
 ## 16. Testes
 
