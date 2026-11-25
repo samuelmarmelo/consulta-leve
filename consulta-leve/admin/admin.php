@@ -77,6 +77,9 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 			'cron_definida'   => array( 'warning', __( 'Nada mudou: DISABLE_WP_CRON já está definida no wp-config.php ou em outro código, e o plugin não interfere.', 'consulta-leve' ) ),
 			'cron_embutida'   => array( 'warning', __( 'Nada mudou: esta cópia está embutida em um tema ou plugin. O cron real só funciona com a Consulta Leve instalada como plugin próprio.', 'consulta-leve' ) ),
 			'hsts_confirmar'  => array( 'warning', __( 'O HSTS ficou como estava: a opção com subdomínios e preload só é salva com a caixa de confirmação marcada. O resto foi salvo.', 'consulta-leve' ) ),
+			'htaccess_ligado' => array( 'success', __( 'Cabeçalhos escritos no .htaccess e conferidos no site.', 'consulta-leve' ) ),
+			'htaccess_desligado' => array( 'success', __( 'O bloco da Consulta Leve não está mais no .htaccess. O PHP segue enviando os cabeçalhos marcados.', 'consulta-leve' ) ),
+			'htaccess_recusado' => array( 'warning', __( 'O .htaccess não ficou com os cabeçalhos. O motivo está na seção .htaccess, abaixo. As escolhas continuam valendo pelo PHP.', 'consulta-leve' ) ),
 			'busca_falhou'    => array( 'error', __( 'Não foi possível criar a tabela de busca. Veja o log de erros do servidor.', 'consulta-leve' ) ),
 		);
 	}
@@ -211,7 +214,29 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 
 		consulta_leve_config_gravar( $resultado['valores'] );
 		consulta_leve_registrar( 'config_salvar', 'cabecalhos', 'salvo' === $resultado['aviso'] ? 'ok' : $resultado['aviso'] );
-		consulta_leve_admin_voltar( 'cabecalhos', $resultado['aviso'] );
+		$htaccess = function_exists( 'consulta_leve_htaccess_sincronizar' ) ? consulta_leve_htaccess_sincronizar() : '';
+		consulta_leve_cache_tocar( 'diagnostico' );
+		consulta_leve_admin_voltar( 'cabecalhos', in_array( $htaccess, array( '', 'ok' ), true ) ? $resultado['aviso'] : 'htaccess_recusado' );
+	}
+
+	/**
+	 * Ligar ou desligar os cabeçalhos no .htaccess.
+	 *
+	 * @return void
+	 */
+	function consulta_leve_admin_htaccess(): void {
+		consulta_leve_admin_conferir( 'htaccess' );
+
+		if ( ! function_exists( 'consulta_leve_htaccess_aplicar' ) ) {
+			consulta_leve_admin_voltar( 'cabecalhos', 'htaccess_recusado' );
+		}
+		if ( isset( $_POST['operacao'] ) && 'ligar' === $_POST['operacao'] ) {
+			$aviso = 'ok' === consulta_leve_htaccess_aplicar( 'ligar' ) ? 'htaccess_ligado' : 'htaccess_recusado';
+		} else {
+			$aviso = 'ok' === consulta_leve_htaccess_remover( 'desligar' ) ? 'htaccess_desligado' : 'htaccess_recusado';
+		}
+		consulta_leve_cache_tocar( 'diagnostico' );
+		consulta_leve_admin_voltar( 'cabecalhos', $aviso );
 	}
 
 	/**
@@ -336,6 +361,9 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 		echo consulta_leve_admin_linha( __( 'Cache de objetos', 'consulta-leve' ), $cache ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo consulta_leve_admin_linha( __( 'OPcache', 'consulta-leve' ), ! empty( $d['opcache'] ) ? $sim : $nao ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo consulta_leve_admin_linha( __( 'Cron real (DISABLE_WP_CRON)', 'consulta-leve' ), consulta_leve_admin_cron_rotulo( ! empty( $d['cron_desligado'] ), (string) ( $d['cron_origem'] ?? '' ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		if ( function_exists( 'consulta_leve_htaccess_rotulo' ) ) {
+			echo consulta_leve_admin_linha( __( 'Cabeçalhos no .htaccess', 'consulta-leve' ), consulta_leve_htaccess_rotulo() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+		}
 		echo consulta_leve_admin_linha( __( 'Limite de revisões', 'consulta-leve' ), var_export( $d['revisoes_limite'] ?? true, true ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped,WordPress.PHP.DevelopmentFunctions.error_log_var_export
 		/* translators: 1: quantidade, 2: KB. */
 		echo consulta_leve_admin_linha( __( 'Opções com autoload', 'consulta-leve' ), sprintf( __( '%1$d opções, %2$s KB', 'consulta-leve' ), (int) ( $d['autoload']['n'] ?? 0 ), number_format_i18n( (float) ( $d['autoload']['kb'] ?? 0 ), 1 ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
@@ -535,7 +563,7 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 			echo '<div class="notice inline notice-info"><p>' . esc_html__( 'O tema ou outro código já cuida dos cabeçalhos e dispensou este módulo. As opções ficam paradas mesmo marcadas.', 'consulta-leve' ) . '</p></div>';
 		}
 
-		echo '<p style="max-width:56rem">' . esc_html__( 'Cabeçalhos de segurança enviados pelo PHP nas páginas do site. Cabeçalho que o tema, outro plugin ou o PHP já enviou não é trocado. Arquivos estáticos e páginas servidas por cache que não passa pelo PHP não recebem estes cabeçalhos; cabeçalhos postos pelo servidor (Apache, Nginx, CDN) o PHP não enxerga, então não ligue aqui o que já vem de lá.', 'consulta-leve' ) . '</p>';
+		echo '<p style="max-width:56rem">' . esc_html__( 'Cabeçalhos de segurança enviados pelo PHP nas páginas do site. Cabeçalho que o tema, outro plugin ou o PHP já enviou não é trocado. Arquivos estáticos e páginas servidas por cache que não passa pelo PHP só recebem estes cabeçalhos com a opção do .htaccess, no fim desta aba; cabeçalhos postos pelo servidor (Apache, Nginx, CDN) o PHP não enxerga, então não ligue aqui o que já vem de lá.', 'consulta-leve' ) . '</p>';
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="consulta_leve_cabecalhos">';
 		wp_nonce_field( 'consulta_leve_cabecalhos' );
 
@@ -550,6 +578,51 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 
 		submit_button( __( 'Salvar', 'consulta-leve' ) );
 		echo '</form>';
+
+		consulta_leve_admin_secao_htaccess();
+	}
+
+	/**
+	 * Seção .htaccess (nonce próprio, fora do formulário dos cabeçalhos).
+	 *
+	 * @return void
+	 */
+	function consulta_leve_admin_secao_htaccess(): void {
+		if ( ! function_exists( 'consulta_leve_htaccess_estado' ) ) {
+			return;
+		}
+
+		consulta_leve_htaccess_revisar( true );
+		$config  = consulta_leve_config_sanitizar( get_option( CONSULTA_LEVE_OPCAO_CONFIG, array() ) );
+		$estado  = consulta_leve_htaccess_estado();
+		$recusa  = consulta_leve_htaccess_recusa( consulta_leve_htaccess_fatos( consulta_leve_htaccess_arquivo(), $config ) );
+		$motivos = consulta_leve_htaccess_motivos();
+		$bloco   = consulta_leve_htaccess_bloco( $config );
+
+		echo '<h2>' . esc_html__( 'Também no .htaccess', 'consulta-leve' ) . '</h2>';
+		echo '<p style="max-width:56rem">' . esc_html__( 'Opcional, para arquivos estáticos e páginas em cache. Só em Apache ou LiteSpeed. Escreve um bloco próprio antes do bloco do WordPress, sem mexer em outra linha, e confere pedindo a página inicial e um arquivo do site. Se algo sair diferente, o arquivo volta ao que era. Durante a conferência (segundos) um servidor que não aceite as linhas pode responder com erro até a volta. Tenha acesso por FTP ou SSH à mão.', 'consulta-leve' ) . '</p>';
+		echo '<table class="widefat striped" style="max-width:56rem"><tbody>';
+		echo consulta_leve_admin_linha( __( 'Estado', 'consulta-leve' ), consulta_leve_htaccess_rotulo() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+		if ( $estado['em'] > 0 ) {
+			echo consulta_leve_admin_linha( __( 'Última mudança', 'consulta-leve' ), wp_date( 'd/m/Y H:i', $estado['em'] ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+		}
+		if ( '' !== $recusa && 'ativo' !== $estado['estado'] ) {
+			echo consulta_leve_admin_linha( __( 'Não dá para ligar agora', 'consulta-leve' ), $motivos[ $recusa ] ?? $recusa ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+		}
+		if ( 'ativo' === $estado['estado'] && hash( 'sha256', $bloco ) !== $estado['sha_bloco'] ) {
+			echo consulta_leve_admin_linha( __( 'Atenção', 'consulta-leve' ), __( 'o arquivo ainda tem as escolhas anteriores; salve os cabeçalhos de novo', 'consulta-leve' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+		}
+		echo '</tbody></table>';
+		if ( '' !== $bloco ) {
+			echo '<p>' . esc_html__( 'Bloco com as escolhas salvas:', 'consulta-leve' ) . '</p><pre style="white-space:pre-wrap;max-width:56rem;background:#fff;border:1px solid #c3c4c7;padding:.75em">' . esc_html( $bloco ) . '</pre>';
+		}
+
+		if ( '' === $recusa && 'ativo' !== $estado['estado'] ) {
+			echo consulta_leve_admin_botao( 'htaccess', __( 'Escrever no .htaccess e conferir', 'consulta-leve' ), array( 'operacao' => 'ligar' ), 'button button-primary' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- montado com escape.
+		}
+		if ( 'desligado' !== $estado['estado'] ) {
+			echo consulta_leve_admin_botao( 'htaccess', __( 'Tirar o bloco do .htaccess', 'consulta-leve' ), array( 'operacao' => 'desligar' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- montado com escape.
+		}
 	}
 
 	/**
@@ -669,6 +742,7 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 	add_action( 'admin_post_consulta_leve_medir', 'consulta_leve_admin_medir' );
 	add_action( 'admin_post_consulta_leve_indice', 'consulta_leve_admin_indice' );
 	add_action( 'admin_post_consulta_leve_cabecalhos', 'consulta_leve_admin_cabecalhos' );
+	add_action( 'admin_post_consulta_leve_htaccess', 'consulta_leve_admin_htaccess' );
 	add_action( 'admin_post_consulta_leve_cron', 'consulta_leve_admin_cron' );
 	add_action( 'admin_post_consulta_leve_busca', 'consulta_leve_admin_busca' );
 	add_filter( 'plugin_action_links_' . plugin_basename( CONSULTA_LEVE_ARQUIVO ), 'consulta_leve_admin_links' );

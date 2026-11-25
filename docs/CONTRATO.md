@@ -662,7 +662,7 @@ uma escrita pendente dele mesmo): o painel explica. O bloco vale também para
 painel, `wp-login.php`, REST e arquivos: onde o núcleo já manda o cabeçalho,
 fica o do núcleo. Escolhas mudadas só pelo filtro `consulta_leve_config` não
 chegam ao arquivo. Registro: `htaccess`, `ligar`, `desligar`, `salvar`,
-`desativar` ou `desfazer`.
+`desativar`, `desfazer` ou `revisar`.
 
 ## 16. Testes
 

@@ -218,6 +218,11 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 		} elseif ( ! $d['cron_desligado'] ) {
 			$dica( __( 'O WP-Cron roda nas visitas. Em site com tráfego ou em conta com vários WordPress, o cron real da hospedagem com DISABLE_WP_CRON alivia o servidor.', 'consulta-leve' ) );
 		}
+		if ( in_array( $d['htaccess']['motivo'] ?? '', array( 'volta_falhou', 'volta_nao_conferida' ), true ) ) {
+			$alerta( __( 'Uma mudança no .htaccess não pôde ser desfeita ou conferida. Veja a aba Cabeçalhos.', 'consulta-leve' ) );
+		} elseif ( 'bloco_sumiu' === ( $d['htaccess']['motivo'] ?? '' ) ) {
+			$dica( __( 'O bloco de cabeçalhos do .htaccess foi mudado por outro meio e o PHP voltou a enviá-los. Veja a aba Cabeçalhos.', 'consulta-leve' ) );
+		}
 		if ( $d['contagens']['transients'] > 1000 ) {
 			$dica( __( 'Muitos transients vencidos em wp_options. O WordPress apaga vencidos uma vez por dia; se o número não cai, o cron pode estar parado.', 'consulta-leve' ) );
 		}
@@ -259,6 +264,7 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 					'cron_desligado'  => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
 					'cron_origem'     => function_exists( 'consulta_leve_cron_definido_por' ) ? consulta_leve_cron_definido_por() : ( defined( 'DISABLE_WP_CRON' ) ? 'wp_config' : '' ),
 					'cron_estado'     => function_exists( 'consulta_leve_cron_estado' ) ? consulta_leve_cron_estado( consulta_leve_cron_situacao() ) : '',
+					'htaccess'        => function_exists( 'consulta_leve_htaccess_estado' ) ? array_intersect_key( consulta_leve_htaccess_estado(), array( 'estado' => 1, 'motivo' => 1 ) ) : array(),
 					'revisoes_limite' => defined( 'WP_POST_REVISIONS' ) ? WP_POST_REVISIONS : true,
 					'autoload'        => consulta_leve_diag_autoload(),
 					'tabelas'         => consulta_leve_diag_tabelas(),
