@@ -84,7 +84,7 @@ const admin = ler('consulta-leve/admin/admin.php');
 tem(admin, "function consulta_leve_admin_htaccess(): void {\n\t\tconsulta_leve_admin_conferir( 'htaccess' );", 'nonce e permissão antes de tudo');
 tem(admin, "add_action( 'admin_post_consulta_leve_htaccess', 'consulta_leve_admin_htaccess' );");
 tem(admin, "consulta_leve_admin_botao( 'htaccess'", 'nonce próprio');
-tem(ler('consulta-leve/diagnostico/diagnostico.php'), "'htaccess'        =>", 'estado no diagnóstico');
+tem(ler('consulta-leve/diagnostico/diagnostico.php'), "$d['htaccess'] ", 'estado no diagnóstico');
 tem(ler('consulta-leve/consulta-leve.php'), "'seguranca/htaccess.php',");
 
 const contrato = ler('docs/CONTRATO.md');
