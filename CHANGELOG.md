@@ -5,6 +5,17 @@ Versões: [SemVer](https://semver.org/lang/pt-BR/).
 
 ## [Não publicado]
 
+### Adicionado
+- Cron real: chave opcional, desligada por padrão, que desliga o WP-Cron das
+  visitas sem editar o `wp-config.php`. Só liga com um cron externo visto nos
+  últimos 30 minutos e volta sozinha ao WP-Cron das visitas se ele sumir por
+  60 minutos.
+- Diagnóstico: `cron_origem` e `cron_estado` dizem se `DISABLE_WP_CRON` veio
+  do `wp-config.php` ou deste plugin; alerta de cron externo parado.
+
+### Alterado
+- O formulário geral do painel não muda chaves com formulário próprio.
+
 ## [0.1.0] - 2026-11-16
 
 Primeira versão.
