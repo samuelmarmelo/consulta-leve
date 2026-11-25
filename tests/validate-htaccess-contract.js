@@ -20,7 +20,7 @@ function listar(pasta, saida = []) {
   return saida;
 }
 
-const ht = ler('consulta-leve/seguranca/htaccess.php');
+const ht = ler('consulta-leve/seguranca/htaccess.php') + ler('consulta-leve/seguranca/ensaio.php');
 const corpo = (nome) => {
   const inicio = ht.indexOf(`function ${nome}(`);
   assert.ok(inicio > 0, `função ${nome}`);
@@ -31,7 +31,7 @@ const corpo = (nome) => {
 // Só este módulo escreve em .htaccess; ninguém escreve no wp-config.php.
 for (const f of listar('consulta-leve')) {
   const t = ler(f);
-  if (f !== 'consulta-leve/seguranca/htaccess.php') {
+  if (!/seguranca\/(?:htaccess|ensaio)\.php$/.test(f)) {
     assert.ok(!/(?:fopen|fwrite|file_put_contents|rename|unlink|ftruncate)\s*\([^;]*htaccess/i.test(t), `${f}: não escreve .htaccess`);
   }
   assert.ok(!/(?:fopen|fwrite|file_put_contents|rename|unlink|copy)\s*\([^;]*wp-config/i.test(t), `${f}: wp-config.php intocável`);
@@ -51,7 +51,7 @@ tem(bloco, "\"%{HTTPS} == 'on' && \"", 'HSTS e CSP só em HTTPS');
 assert.ok(!/setifempty|always|X-XSS-Protection|interest-cohort/.test(bloco), 'tabela onsuccess e sem cabeçalho obsoleto');
 
 // Recusas e textos.
-for (const motivo of ['embutida', 'permissao', 'multisite', 'servidor', 'bloqueado', 'dispensado', 'sem_escolha', 'caminho', 'link', 'nao_arquivo', 'tamanho', 'sem_leitura', 'sem_escrita', 'marcadores', 'marcador_wp', 'secao', 'continuacao', 'binario', 'mudou', 'bloco_sumiu', 'interrompido', 'volta_falhou']) {
+for (const motivo of ['embutida', 'permissao', 'multisite', 'servidor', 'bloqueado', 'dispensado', 'sem_escolha', 'caminho', 'link', 'nao_arquivo', 'tamanho', 'sem_leitura', 'sem_escrita', 'ensaio_local', 'ensaio_sobra', 'marcadores', 'marcador_wp', 'secao', 'continuacao', 'binario', 'mudou', 'bloco_sumiu', 'interrompido', 'volta_falhou']) {
   assert.match(corpo('consulta_leve_htaccess_motivos'), new RegExp(`'${motivo}'\\s+=> __\\(`), `texto: ${motivo}`);
 }
 for (const fato of ['is_link( $arquivo )', 'is_multisite()', 'DISALLOW_FILE_MODS', "current_user_can( 'manage_options' )"]) {
@@ -60,7 +60,7 @@ for (const fato of ['is_link( $arquivo )', 'is_multisite()', 'DISALLOW_FILE_MODS
 
 // Ordem da escrita: cópia, base, hash de escrita, escrita, conferência, ativo.
 const executar = corpo('consulta_leve_htaccess_executar');
-const passos = ["'estado'   => 'pendente'", 'consulta_leve_htaccess_guardar_copia(', 'consulta_leve_htaccess_conferir_base(', "'sha_novo' => hash(", "consulta_leve_htaccess_escrever( $arquivo, $original, $novo['conteudo'] )", 'consulta_leve_htaccess_conferir( $antes', 'consulta_leve_htaccess_desfazer(', "'estado'    => 'ativo'"];
+const passos = ["'estado'   => 'pendente'", 'consulta_leve_htaccess_guardar_copia(', 'consulta_leve_htaccess_ensaiar(', 'consulta_leve_htaccess_limpar(', 'consulta_leve_htaccess_conferir_base(', "'sha_novo' => hash(", "consulta_leve_htaccess_escrever( $arquivo, $original, $novo['conteudo'] )", 'consulta_leve_htaccess_conferir( $antes', 'consulta_leve_htaccess_desfazer(', "'estado'    => 'ativo'"];
 let anterior = -1;
 for (const passo of passos) {
   const aqui = executar.indexOf(passo);
@@ -69,7 +69,16 @@ for (const passo of passos) {
 }
 assert.equal((ht.match(/'estado'\s+=> 'ativo'/g) || []).length, 1, 'ativo só depois da conferência');
 assert.match(corpo('consulta_leve_htaccess_guardar_copia'), /CONSULTA_LEVE_OPCAO_HTACCESS_COPIA,[\s\S]*\n\t\t\tfalse\n/, 'cópia sem autoload');
-assert.match(corpo('consulta_leve_htaccess_escrever'), /consulta_leve_htaccess_ler\( \$arquivo \) !== \$esperado[\s\S]*rename\([\s\S]*flock\(/, 'confere antes, rename e trava');
+assert.match(corpo('consulta_leve_htaccess_trocar'), /consulta_leve_htaccess_flock\( \$h \)[\s\S]*stream_get_contents\( \$h \) !== \$esperado[\s\S]*rename\([\s\S]*LOCK_UN/, 'travado da comparação ao rename');
+assert.match(corpo('consulta_leve_htaccess_trocar'), /'uid', 'gid', 'mode'/, 'dono, grupo e permissões iguais');
+assert.ok(!/ftruncate|fwrite/.test(ht.replace(corpo('consulta_leve_htaccess_criar'), '')), 'nenhuma escrita por cima do arquivo');
+assert.match(ht, /const CONSULTA_LEVE_HTACCESS_TRAVA_S   = 300;/, 'trava bem acima do pior caso');
+tem(ht, "const CONSULTA_LEVE_HTACCESS_ENSAIO = array( 'sonda/.htaccess', 'sonda/ensaio.txt', '.htaccess', 'ensaio.txt' );", 'lista fechada do ensaio');
+tem(corpo('consulta_leve_htaccess_ensaio_pasta'), "'/^consulta-leve-ensaio-[0-9a-f]{32}$/D'", 'nome do ensaio fechado');
+tem(corpo('consulta_leve_htaccess_gravar_estado'), 'delete_option( CONSULTA_LEVE_OPCAO_HTACCESS_COPIA )', 'cópia sai depois de conferir');
+const sair = ler('consulta-leve/uninstall.php');
+tem(sair, "defined( 'WP_UNINSTALL_PLUGIN' ) || exit;");
+assert.ok(!/delete_option|DROP|unlink|\$wpdb/.test(sair), 'desinstalar não apaga dado');
 tem(corpo('consulta_leve_htaccess_aplicar'), 'register_shutdown_function(');
 tem(corpo('consulta_leve_htaccess_aplicar'), "consulta_leve_travar( 'htaccess'");
 tem(corpo('consulta_leve_htaccess_pedir'), "'redirection' => 0");
@@ -89,5 +98,6 @@ tem(ler('consulta-leve/consulta-leve.php'), "'seguranca/htaccess.php',");
 
 const contrato = ler('docs/CONTRATO.md');
 tem(contrato, '### 15.2 Cabeçalhos no `.htaccess` (`seguranca/htaccess.php`)');
+tem(ler('consulta-leve/readme.txt'), 'apague as linhas de # BEGIN Consulta Leve até # END Consulta Leve', 'volta à mão no readme');
 tem(contrato, '| `cab_htaccess` | bool | false |');
 console.log('htaccess: ok');

@@ -10,17 +10,23 @@
 
 $cl_pasta = sys_get_temp_dir() . '/cl-htaccess-' . bin2hex( random_bytes( 6 ) );
 mkdir( $cl_pasta );
+mkdir( $cl_pasta . '/wp-content' );
+mkdir( $cl_pasta . '/wp-content/uploads' );
 define( 'ABSPATH', $cl_pasta . '/' );
-register_shutdown_function(
-	static function () use ( $cl_pasta ) {
-		foreach ( array_merge( (array) glob( $cl_pasta . '/*' ), (array) glob( $cl_pasta . '/.ht*' ) ) as $f ) {
-			if ( is_file( $f ) || is_link( $f ) ) {
-				unlink( $f );
-			}
-		}
-		@rmdir( $cl_pasta );
+
+/**
+ * Esvazia e remove uma pasta do próprio teste.
+ *
+ * @param string $pasta Pasta.
+ */
+function remover_pasta( string $pasta ) { // phpcs:ignore
+	foreach ( array_diff( (array) @scandir( $pasta ), array( '.', '..', false ) ) as $n ) {
+		$c = $pasta . '/' . $n;
+		is_dir( $c ) && ! is_link( $c ) ? remover_pasta( $c ) : unlink( $c );
 	}
-);
+	@rmdir( $pasta );
+}
+register_shutdown_function( 'remover_pasta', $cl_pasta );
 
 require __DIR__ . '/stubs.php';
 
@@ -41,6 +47,11 @@ function is_embed() { return false; } // phpcs:ignore
 function is_customize_preview() { return false; } // phpcs:ignore
 function is_wp_error( $v ) { return null === $v; } // phpcs:ignore
 function wp_remote_retrieve_headers( $r ) { return $r['headers']; } // phpcs:ignore
+function wp_remote_retrieve_body( $r ) { return $r['body'] ?? ''; } // phpcs:ignore
+function set_url_scheme( $u, $s ) { return preg_replace( '#^https?://#', $s . '://', $u ); } // phpcs:ignore
+function admin_url( $p = '' ) { return 'https://exemplo.test/wp-admin/' . $p; } // phpcs:ignore
+function wp_die( $m ) { throw new \RuntimeException( $m ); } // phpcs:ignore
+function wp_get_upload_dir() { return $GLOBALS['t']['uploads'] + array( 'basedir' => ABSPATH . 'wp-content/uploads', 'baseurl' => 'http://exemplo.test/wp-content/uploads', 'error' => false ); } // phpcs:ignore
 function wp_remote_retrieve_response_code( $r ) { return $r['status']; } // phpcs:ignore
 
 /**
@@ -57,16 +68,35 @@ function wp_remote_get( $url, $args ) { // phpcs:ignore
 	if ( $t['antes_de'] ) {
 		call_user_func( $t['antes_de'], $t['pedidos'] );
 	}
-	$arquivo = ABSPATH . '.htaccess';
-	$linhas  = is_file( $arquivo ) ? preg_split( '/\r?\n/', file_get_contents( $arquivo ) ) : array();
-	$regras  = preg_grep( '/^Header /', $linhas );
+	$caminho = (string) parse_url( $url, PHP_URL_PATH );
+	$ensaio  = false !== strpos( $caminho, '/uploads/' );
+	// Todo .htaccess da raiz até a pasta do arquivo, na ordem.
+	$linhas = array();
+	$pasta  = rtrim( ABSPATH, '/' );
+	foreach ( array_merge( array( '' ), array_filter( explode( '/', dirname( $caminho ) ) ) ) as $parte ) {
+		$pasta .= '' === $parte ? '' : '/' . $parte;
+		$h      = $pasta . '/.htaccess';
+		clearstatcache();
+		if ( is_file( $h ) ) {
+			$linhas = array_merge( $linhas, preg_split( '/\r?\n/', file_get_contents( $h ) ) );
+		}
+		if ( '' === $parte ) {
+			$t['raiz_com_bloco'] = $t['raiz_com_bloco'] || false !== strpos( implode( "\n", $linhas ), 'Header set' );
+		}
+	}
+	$regras   = preg_grep( '/^Header set /', $linhas );
+	$servidor = $t['so_raiz'] && $ensaio ? 'apache' : $t['servidor'];
+	$proxy    = $t['proxy'] && ! ( $t['so_raiz'] && $ensaio );
 	if ( ! empty( $t['sem_rede'] ) ) {
 		return null;
 	}
-	if ( $regras && 'erro' === $t['servidor'] ) {
+	if ( $regras && 'erro' === $servidor ) {
 		return array( 'status' => 500, 'headers' => array() );
 	}
-	$estatico = false !== strpos( $url, 'blank.gif' );
+	if ( $ensaio && ( $t['uploads_fechado'] || ! is_file( ABSPATH . ltrim( $caminho, '/' ) ) ) ) {
+		return array( 'status' => $t['uploads_fechado'] ? 403 : 404, 'headers' => array() );
+	}
+	$estatico = $ensaio || false !== strpos( $url, 'blank.gif' );
 	$always   = array();
 	$sucesso  = array();
 	if ( ! $estatico ) {
@@ -90,19 +120,23 @@ function wp_remote_get( $url, $args ) { // phpcs:ignore
 	foreach ( $t['vhost'] as $n => $v ) {
 		$sucesso[ $n ] = array( $v );
 	}
-	if ( 'nao_le' !== $t['servidor'] ) {
+	if ( 'nao_le' !== $servidor ) {
+		foreach ( preg_grep( '/^Header always set /', $linhas ) as $l ) {
+			confere( 'linha da sonda no formato fechado', preg_match( '/^Header always set ([A-Za-z-]+) "consulta-leve-sonda"$/', $l, $m ), 1 );
+			$always[ $m[1] ] = array( CONSULTA_LEVE_HTACCESS_SONDA );
+		}
 		foreach ( $regras as $regra ) {
 			confere( 'linha do bloco no formato fechado', preg_match( '/^Header set ([A-Za-z-]+) "([^"]+)" "expr=([^"]+)"$/', $regra, $m ), 1 );
 			$vale = true;
 			foreach ( explode( ' && ', $m[3] ) as $parte ) {
 				if ( "%{HTTPS} == 'on'" === $parte ) {
-					$vale = $vale && 'https' === $t['esquema'] && empty( $t['proxy'] );
+					$vale = $vale && 'https' === $t['esquema'] && ! $proxy;
 				} else {
 					confere( 'condição conhecida', preg_match( "/^-z resp\('([A-Za-z-]+)'\)$/", $parte, $r ), 1 );
 					$vale = $vale && empty( $always[ $r[1] ] ) && empty( $sucesso[ $r[1] ] );
 				}
 			}
-			if ( $vale || 'ignora_condicao' === $t['servidor'] ) {
+			if ( $vale || 'ignora_condicao' === $servidor ) {
 				$sucesso[ $m[1] ] = array( $m[2] );
 			}
 		}
@@ -119,14 +153,14 @@ function wp_remote_get( $url, $args ) { // phpcs:ignore
 		$saida[ $n ] = 1 === count( $vs ) ? $vs[0] : $vs;
 	}
 
-	return array( 'status' => $t['status'], 'headers' => $saida );
+	return array( 'status' => $ensaio ? 200 : $t['status'], 'headers' => $saida, 'body' => $ensaio ? $t['corpo'] ?? file_get_contents( ABSPATH . ltrim( $caminho, '/' ) ) : '' );
 }
 
 $GLOBALS['t']['proprio'] = true;
 add_filter(
 	'consulta_leve_modulos',
 	static function () {
-		return array( 'nucleo/config.php', 'nucleo/coexistencia.php', 'nucleo/trava.php', 'nucleo/cache.php', 'nucleo/registro.php', 'seguranca/cabecalhos.php', 'seguranca/htaccess.php', 'admin/admin.php' );
+		return array( 'nucleo/config.php', 'nucleo/coexistencia.php', 'nucleo/trava.php', 'nucleo/cache.php', 'nucleo/registro.php', 'seguranca/cabecalhos.php', 'seguranca/ensaio.php', 'seguranca/htaccess.php', 'admin/admin.php' );
 	}
 );
 require __DIR__ . '/../../consulta-leve/consulta-leve.php';
@@ -170,6 +204,10 @@ function cenario( ?string $conteudo, array $extra = array(), ?array $config = nu
 			'cache_na_frente' => false,
 			'proxy'           => false,
 			'nocache'         => false,
+			'uploads'         => array(),
+			'uploads_fechado' => false,
+			'so_raiz'         => false,
+			'raiz_com_bloco'  => false,
 		),
 		$extra
 	);
@@ -197,7 +235,7 @@ function situacao() { // phpcs:ignore
 
 /** Sobrou temporário na pasta? */
 function sobras() { // phpcs:ignore
-	return (array) glob( ABSPATH . '.htaccess-*' );
+	return array_merge( (array) glob( ABSPATH . '.htaccess-*' ), (array) glob( ABSPATH . 'wp-content/uploads/*' ) );
 }
 
 /* Bloco ----------------------------------------------------------------------- */
@@ -293,7 +331,7 @@ confere( 'seção fechada antes: aceita', $com( "<IfModule a.c>\n</IfModule>\n" 
 foreach ( array( 'Apache' => true, 'Apache/2.4.58 (Unix) OpenSSL/3' => true, 'LiteSpeed' => true, 'openlitespeed/1.7.19' => true, 'nginx/1.25' => false, 'Apache-Coyote/1.1' => false, 'Microsoft-IIS/10.0' => false, 'PHP.wasm' => false, '' => false, 'proxy Apache' => false ) as $software => $ok ) {
 	confere( "servidor: {$software}", consulta_leve_htaccess_servidor_ok( $software ), $ok );
 }
-$bons = array( 'proprio' => true, 'pode' => true, 'multisite' => false, 'servidor' => true, 'bloqueado' => false, 'dispensado' => false, 'escolha' => true, 'caminho' => true, 'link' => false, 'existe' => true, 'arquivo' => true, 'tamanho' => 10, 'leitura' => true, 'escrita' => true );
+$bons = array( 'proprio' => true, 'pode' => true, 'multisite' => false, 'servidor' => true, 'bloqueado' => false, 'dispensado' => false, 'escolha' => true, 'caminho' => true, 'link' => false, 'existe' => true, 'arquivo' => true, 'tamanho' => 10, 'leitura' => true, 'escrita' => true, 'ensaio' => true );
 confere( 'tudo certo', consulta_leve_htaccess_recusa( $bons ), '' );
 confere( 'sem fatos: recusa', consulta_leve_htaccess_recusa( array() ), 'embutida' );
 foreach (
@@ -311,15 +349,15 @@ foreach (
 		'tamanho'     => array( 'tamanho' => CONSULTA_LEVE_HTACCESS_MAX + 1 ),
 		'sem_leitura' => array( 'leitura' => false ),
 		'sem_escrita' => array( 'escrita' => false ),
+		'ensaio_local' => array( 'ensaio' => false ),
 	) as $motivo => $ruim
 ) {
 	confere( "recusa {$motivo}", consulta_leve_htaccess_recusa( array_merge( $bons, $ruim ) ), $motivo );
 	confere( "texto do motivo {$motivo}", isset( consulta_leve_htaccess_motivos()[ $motivo ] ), true );
 }
 confere( 'link quebrado também recusa', consulta_leve_htaccess_recusa( array_merge( $bons, array( 'link' => true, 'existe' => false ) ) ), 'link' );
-confere( 'tirar não exige Apache', consulta_leve_htaccess_recusa( array_merge( $bons, array( 'servidor' => false, 'escolha' => false ) ), 'remover' ), '' );
-confere( 'tirar respeita DISALLOW_FILE_MODS', consulta_leve_htaccess_recusa( array_merge( $bons, array( 'bloqueado' => true ) ), 'remover' ), 'bloqueado' );
-confere( 'desfazer escrita própria não', consulta_leve_htaccess_recusa( array_merge( $bons, array( 'bloqueado' => true ) ), 'desfazer' ), '' );
+confere( 'tirar não exige Apache', consulta_leve_htaccess_recusa( array_merge( $bons, array( 'servidor' => false, 'escolha' => false, 'ensaio' => false ) ), false ), '' );
+confere( 'tirar respeita DISALLOW_FILE_MODS', consulta_leve_htaccess_recusa( array_merge( $bons, array( 'bloqueado' => true ) ), false ), 'bloqueado' );
 confere( 'caminho: pasta do WordPress', consulta_leve_htaccess_caminho_ok( ARQUIVO ), true );
 confere( 'caminho: pasta acima', consulta_leve_htaccess_caminho_ok( dirname( ABSPATH ) . '/.htaccess' ), true );
 confere( 'caminho: outra pasta', consulta_leve_htaccess_caminho_ok( __DIR__ . '/.htaccess' ), false );
@@ -334,7 +372,8 @@ $nada = static function ( string $nome, string $motivo, array $extra = array(), 
 	$_SERVER['SERVER_SOFTWARE'] = $software;
 	confere( "{$nome}: recusa", consulta_leve_htaccess_aplicar( 'ligar' ), $motivo );
 	confere( "{$nome}: estado", situacao(), array( 'recusado', $motivo, false ) );
-	confere( "{$nome}: arquivo intacto", bytes(), $wp );
+	confere( "{$nome}: arquivo intacto e nunca escrito", array( bytes(), $GLOBALS['t']['raiz_com_bloco'] ), array( $wp, false ) );
+	confere( "{$nome}: sem sobras", sobras(), array() );
 	confere( "{$nome}: PHP segue", count( consulta_leve_cabecalhos_enviar() ) >= ( null === $config ? 5 : 0 ), true );
 	confere( "{$nome}: registrado", consulta_leve_registro()[0]['resultado'], $motivo );
 };
@@ -343,7 +382,15 @@ $nada( 'multisite', 'multisite', array( 'multisite' => true ) );
 $nada( 'embutida', 'embutida', array( 'proprio' => false ) );
 $nada( 'DISALLOW_FILE_MODS', 'bloqueado', array( 'mods' => false ) );
 $nada( 'nada marcado', 'sem_escolha', array(), 'Apache', array() );
-$nada( 'sem rede', 'base_sem_resposta', array( 'sem_rede' => true ) );
+$nada( 'sem rede', 'ensaio_local', array( 'sem_rede' => true ) );
+$nada( 'rede cai antes da base', 'base_sem_resposta', array( 'antes_de' => static function ( $n ) { $GLOBALS['t']['sem_rede'] = $n >= 5; } ) ); // phpcs:ignore
+$nada( 'uploads fora do WordPress', 'ensaio_local', array( 'uploads' => array( 'basedir' => __DIR__ ) ) );
+$nada( 'uploads inexistente', 'ensaio_local', array( 'uploads' => array( 'basedir' => ABSPATH . 'nao-existe' ) ) );
+$nada( 'uploads com erro', 'ensaio_local', array( 'uploads' => array( 'error' => 'x' ) ) );
+$nada( 'uploads em outro endereço', 'ensaio_local', array( 'uploads' => array( 'baseurl' => 'https://cdn.exemplo.test/u' ) ) );
+$nada( 'uploads em outra porta', 'ensaio_local', array( 'uploads' => array( 'baseurl' => 'https://exemplo.test:8443/wp-content/uploads' ) ) );
+$nada( 'uploads sem acesso pela web', 'ensaio_local', array( 'uploads_fechado' => true ) );
+$nada( 'uploads respondido por outra coisa', 'ensaio_local', array( 'corpo' => 'página de erro com 200' ) );
 $nada( 'manutenção', 'base_status', array( 'status' => 503 ) );
 $nada( 'redireciona', 'base_status', array( 'status' => 301 ) );
 $nada( 'cache na frente', 'sem_eco', array( 'cache_na_frente' => true ) );
@@ -380,12 +427,13 @@ foreach ( array( 'fpm', 'modphp' ) as $sapi ) {
 	confere( "{$sapi}: liga", consulta_leve_htaccess_aplicar( 'ligar' ), 'ok' );
 	confere( "{$sapi}: estado", situacao(), array( 'ativo', '', true ) );
 	confere( "{$sapi}: arquivo", bytes(), $com( $wp )['conteudo'] );
-	confere( "{$sapi}: 2 pedidos antes e 4 depois", $GLOBALS['t']['pedidos'], 6 );
+	confere( "{$sapi}: 4 do ensaio, 2 antes e 4 depois", $GLOBALS['t']['pedidos'], 10 );
 	confere( "{$sapi}: PHP calado", consulta_leve_cabecalhos_enviar(), array() );
 	confere( "{$sapi}: página com cada cabeçalho uma vez", array_filter( wp_remote_get( home_url( '/' ), array() )['headers'], 'is_array' ), array() );
 	confere( "{$sapi}: página com os cinco", count( wp_remote_get( home_url( '/' ), array() )['headers'] ), 5 );
 	confere( "{$sapi}: token apagado", consulta_leve_htaccess_estado()['token'], '' );
-	confere( "{$sapi}: cópia íntegra", consulta_leve_htaccess_copia( ARQUIVO ), $wp );
+	confere( "{$sapi}: conferido, a cópia sai do banco", array_key_exists( CONSULTA_LEVE_OPCAO_HTACCESS_COPIA, $GLOBALS['cl_t']['opcoes'] ), false );
+	confere( "{$sapi}: nome do ensaio apagado", consulta_leve_htaccess_estado()['ensaio'], '' );
 	confere( "{$sapi}: sem sobras", sobras(), array() );
 	confere( "{$sapi}: trava livre", consulta_leve_trava_ler( consulta_leve_trava_opcao( 'htaccess' ) ), '' );
 	confere( "{$sapi}: de novo não muda nada", array( consulta_leve_htaccess_aplicar( 'ligar' ), bytes() ), array( 'ok', $com( $wp )['conteudo'] ) );
@@ -423,49 +471,58 @@ confere( 'servidor já envia: liga sem repetir', consulta_leve_htaccess_aplicar(
 
 foreach (
 	array(
-		'erro 500'          => array( 'erro_5xx', array( 'servidor' => 'erro' ) ),
-		'sem mod_headers'   => array( 'ausente', array( 'servidor' => 'nao_le' ) ),
-		'HTTPS no proxy'    => array( 'ausente', array( 'proxy' => true ) ),
-		'condição ignorada' => array( 'condicao', array( 'servidor' => 'ignora_condicao', 'esquema' => 'http' ) ),
-		'repete no FPM'     => array( 'duplicado', array( 'servidor' => 'ignora_condicao' ) ),
-		'troca no mod_php'  => array( 'trocado', array( 'servidor' => 'ignora_condicao', 'sapi' => 'modphp' ) ),
-		'troca o do tema'   => array( 'trocado', array( 'servidor' => 'ignora_condicao', 'sapi' => 'modphp', 'tema' => array( 'Referrer-Policy' => 'no-referrer' ) ) ),
+		'erro 500'          => array( 'erro_5xx', 'erro_5xx', array( 'servidor' => 'erro' ) ),
+		'sem mod_headers'   => array( 'ausente', 'ausente', array( 'servidor' => 'nao_le' ) ),
+		'HTTPS no proxy'    => array( 'ausente', 'ausente', array( 'proxy' => true ) ),
+		'condição ignorada' => array( 'condicao', 'condicao', array( 'servidor' => 'ignora_condicao', 'esquema' => 'http' ) ),
+		'repete no FPM'     => array( 'duplicado', 'duplicado', array( 'servidor' => 'ignora_condicao' ) ),
+		'troca no mod_php'  => array( 'duplicado', 'trocado', array( 'servidor' => 'ignora_condicao', 'sapi' => 'modphp' ) ),
+		'troca o do tema'   => array( 'duplicado', 'trocado', array( 'servidor' => 'ignora_condicao', 'sapi' => 'modphp', 'tema' => array( 'Referrer-Policy' => 'no-referrer' ) ) ),
 	) as $nome => $caso
 ) {
-	foreach ( array( $wp, $crlf, null ) as $i => $antes ) {
-		cenario( $antes, $caso[1] );
-		confere( "{$nome} {$i}: motivo", consulta_leve_htaccess_aplicar( 'ligar' ), $caso[0] );
-		confere( "{$nome} {$i}: bytes de volta", bytes(), $antes );
-		confere( "{$nome} {$i}: estado", situacao(), array( 'recusado', $caso[0], false ) );
-		confere( "{$nome} {$i}: sem sobras", sobras(), array() );
+	foreach ( array( false, true ) as $so_raiz ) {
+		foreach ( array( $wp, $crlf, null ) as $i => $antes ) {
+			$onde = $so_raiz ? 'raiz' : 'ensaio';
+			cenario( $antes, $caso[2] + array( 'so_raiz' => $so_raiz ) );
+			confere( "{$nome} {$i} ({$onde}): motivo", consulta_leve_htaccess_aplicar( 'ligar' ), $caso[ $so_raiz ? 1 : 0 ] );
+			confere( "{$nome} {$i} ({$onde}): bytes de volta", bytes(), $antes );
+			confere( "{$nome} {$i} ({$onde}): raiz escrita só depois do ensaio", $GLOBALS['t']['raiz_com_bloco'], $so_raiz );
+			confere( "{$nome} {$i} ({$onde}): estado", situacao(), array( 'recusado', $caso[ $so_raiz ? 1 : 0 ], false ) );
+			confere( "{$nome} {$i} ({$onde}): sem sobras", sobras(), array() );
+			confere( "{$nome} {$i} ({$onde}): desfeito, sem cópia", consulta_leve_htaccess_copia( ARQUIVO ), null );
+		}
 	}
 	confere( "{$nome}: PHP segue", count( consulta_leve_cabecalhos_enviar() ), 'http' === $GLOBALS['t']['esquema'] ? 3 : 5 );
 }
 
 // Rede cai depois da escrita.
-cenario( $wp, array( 'antes_de' => static function ( $n ) { $GLOBALS['t']['sem_rede'] = $n >= 4; } ) ); // phpcs:ignore
+cenario( $wp, array( 'antes_de' => static function ( $n ) { $GLOBALS['t']['sem_rede'] = $n >= 8; } ) ); // phpcs:ignore
 confere( 'rede cai: volta, sem conseguir conferir', consulta_leve_htaccess_aplicar( 'ligar' ), 'volta_nao_conferida' );
-confere( 'rede cai: bytes de volta', bytes(), $wp );
+confere( 'rede cai: bytes de volta e cópia guardada', array( bytes(), consulta_leve_htaccess_copia( ARQUIVO ) ), array( $wp, $wp ) );
+consulta_leve_htaccess_remover( 'desligar' );
+confere( 'rede cai, depois desligado: cópia sai', consulta_leve_htaccess_copia( ARQUIVO ), null );
 // Uma página muda de código.
-cenario( $wp, array( 'antes_de' => static function ( $n ) { $GLOBALS['t']['status'] = 4 === $n ? 403 : 200; } ) ); // phpcs:ignore
+cenario( $wp, array( 'antes_de' => static function ( $n ) { $GLOBALS['t']['status'] = 8 === $n ? 403 : 200; } ) ); // phpcs:ignore
 confere( 'código muda', array( consulta_leve_htaccess_aplicar( 'ligar' ), bytes() ), array( 'status_mudou', $wp ) );
 // Erro de código no meio.
 $falha = 0;
 add_action( 'consulta_leve_falha', static function () use ( &$falha ) { ++$falha; } ); // phpcs:ignore
-cenario( $wp, array( 'antes_de' => static function ( $n ) { if ( 5 === $n ) { throw new \RuntimeException( 'x' ); } } ) ); // phpcs:ignore
-confere( 'exceção no meio: desfaz', array( consulta_leve_htaccess_aplicar( 'ligar' ), bytes(), situacao()[0], $falha ), array( 'erro', $wp, 'recusado', 1 ) );
+foreach ( array( 1, 2, 4, 5, 7, 9, 10 ) as $i => $quando ) {
+	cenario( $wp, array( 'antes_de' => static function ( $n ) use ( $quando ) { if ( $quando === $n ) { throw new \RuntimeException( 'x' ); } } ) ); // phpcs:ignore
+	confere( "exceção no pedido {$quando}: desfaz", array( consulta_leve_htaccess_aplicar( 'ligar' ), bytes(), situacao()[0], $falha, sobras() ), array( 'erro', $wp, 'recusado', $i + 1, array() ) );
+}
 confere( 'exceção: trava livre', consulta_leve_trava_ler( consulta_leve_trava_opcao( 'htaccess' ) ), '' );
 
 /* Arquivo mudado por outro ------------------------------------------------------------------- */
 
 $alheio = "# outro plugin\n";
-cenario( $wp, array( 'antes_de' => static function ( $n ) use ( $alheio ) { 2 === $n && file_put_contents( ARQUIVO, $alheio, FILE_APPEND ); } ) ); // phpcs:ignore
+cenario( $wp, array( 'antes_de' => static function ( $n ) use ( $alheio ) { 6 === $n && file_put_contents( ARQUIVO, $alheio, FILE_APPEND ); } ) ); // phpcs:ignore
 confere( 'mudou entre ler e escrever: recusa', consulta_leve_htaccess_aplicar( 'ligar' ), 'mudou' );
 confere( 'mudou entre ler e escrever: fica o do outro', bytes(), $wp . $alheio );
-cenario( $wp, array( 'servidor' => 'nao_le', 'antes_de' => static function ( $n ) use ( $alheio ) { 3 === $n && file_put_contents( ARQUIVO, $alheio, FILE_APPEND ); } ) ); // phpcs:ignore
+cenario( $wp, array( 'servidor' => 'nao_le', 'so_raiz' => true, 'antes_de' => static function ( $n ) use ( $alheio ) { 7 === $n && file_put_contents( ARQUIVO, $alheio, FILE_APPEND ); } ) ); // phpcs:ignore
 confere( 'mudou durante a conferência que falha', consulta_leve_htaccess_aplicar( 'ligar' ), 'ausente' );
 confere( 'sai só o nosso bloco', bytes(), $wp . $alheio );
-cenario( $wp, array( 'antes_de' => static function ( $n ) use ( $alheio ) { 6 === $n && file_put_contents( ARQUIVO, $alheio, FILE_APPEND ); } ) ); // phpcs:ignore
+cenario( $wp, array( 'antes_de' => static function ( $n ) use ( $alheio ) { 10 === $n && file_put_contents( ARQUIVO, $alheio, FILE_APPEND ); } ) ); // phpcs:ignore
 confere( 'mudou no fim da conferência: não vira ativo', array( consulta_leve_htaccess_aplicar( 'ligar' ), situacao()[0], bytes() ), array( 'mudou', 'recusado', $wp . $alheio ) );
 cenario( $wp );
 confere( 'escrita direta com esperado errado', array( consulta_leve_htaccess_escrever( ARQUIVO, 'outro', 'x' ), bytes() ), array( 'mudou', $wp ) );
@@ -480,6 +537,70 @@ consulta_leve_travar( 'htaccess', 60 );
 cenario( $wp );
 consulta_leve_travar( 'htaccess', 60 );
 confere( 'outra requisição com a trava', array( consulta_leve_htaccess_aplicar( 'ligar' ), bytes(), situacao()[0] ), array( 'ocupado', $wp, 'desligado' ) );
+
+// Outro processo segurando a trava do sistema: não escreve.
+cenario( $wp );
+$preso = fopen( ARQUIVO, 'r+b' );
+flock( $preso, LOCK_EX );
+$tomou = microtime( true );
+confere( 'flock alheio: ocupado, sem escrever', consulta_leve_htaccess_trocar( ARQUIVO, $wp, 'novo' ), 'ocupado' );
+confere( 'flock alheio: espera limitada', microtime( true ) - $tomou < 6, true );
+flock( $preso, LOCK_UN );
+fclose( $preso );
+confere( 'flock alheio: intacto, sem sobras', array( bytes(), sobras() ), array( $wp, array() ) );
+
+// Como o insert_with_markers: abre, espera a trava, acrescenta. A mudança nunca se perde.
+file_put_contents( ABSPATH . 'outro.php', '<?php $h = fopen( $argv[1], "r+b" ); touch( $argv[2] ); flock( $h, LOCK_EX ); usleep( (int) $argv[3] ); fseek( $h, 0, SEEK_END ); fwrite( $h, "# outro plugin\n" ); fflush( $h ); flock( $h, LOCK_UN );' );
+foreach ( array( 0, 30000, 120000 ) as $i => $espera ) {
+	cenario( $wp );
+	$sinal = ABSPATH . 'pronto' . $i;
+	$p     = proc_open( array( PHP_BINARY, ABSPATH . 'outro.php', ARQUIVO, $sinal, (string) $espera ), array(), $canos );
+	for ( $k = 0; $k < 500 && ! file_exists( $sinal ); $k++ ) {
+		usleep( 1000 );
+		clearstatcache();
+	}
+	$r = consulta_leve_htaccess_escrever( ARQUIVO, $wp, $com( $wp )['conteudo'] );
+	proc_close( $p );
+	confere( "concorrência {$i}: mudança do outro não se perde", false !== strpos( bytes(), trim( $alheio ) ), true );
+	confere( "concorrência {$i}: sem sobras", sobras(), array() );
+}
+
+/* Pasta de ensaio ------------------------------------------------------------------------------- */
+
+$ens  = 'consulta-leve-ensaio-' . str_repeat( 'a', 32 );
+$onde = ABSPATH . 'wp-content/uploads/' . $ens;
+$por  = static function ( string $extra = '' ) use ( $onde ) {
+	mkdir( $onde );
+	mkdir( $onde . '/sonda' );
+	foreach ( CONSULTA_LEVE_HTACCESS_ENSAIO as $n ) {
+		file_put_contents( $onde . '/' . $n, 'x' );
+	}
+	if ( '' !== $extra ) {
+		file_put_contents( $onde . '/' . $extra, 'de outro' );
+	}
+};
+cenario( $wp );
+$por();
+confere( 'ensaio: some inteiro', array( consulta_leve_htaccess_ensaio_limpar( $ens ), sobras() ), array( true, array() ) );
+$por( 'foto.jpg' );
+confere( 'ensaio: arquivo de outro fica', array( consulta_leve_htaccess_ensaio_limpar( $ens ), array_values( array_diff( scandir( $onde ), array( '.', '..' ) ) ) ), array( false, array( 'foto.jpg' ) ) );
+remover_pasta( $onde );
+foreach ( array( '..', '../uploads', 'consulta-leve-ensaio-', $ens . '/..', strtoupper( $ens ), $ens . "\n" ) as $i => $mau ) {
+	confere( "ensaio: nome forjado {$i}", array( consulta_leve_htaccess_ensaio_pasta( $mau ), consulta_leve_htaccess_ensaio_limpar( $mau ) ), array( '', false ) );
+}
+confere( 'ensaio: nada a limpar', consulta_leve_htaccess_ensaio_limpar( '' ), true );
+// Morto no ensaio: a carga seguinte limpa e a raiz nem mudou.
+$por();
+consulta_leve_htaccess_gravar_estado( array( 'estado' => 'pendente', 'arquivo' => ARQUIVO, 'ensaio' => $ens ) );
+file_put_contents( ABSPATH . '.htaccess-consulta-leve-' . str_repeat( 'b', 16 ) . '.tmp', 'resto' );
+confere( 'morto no ensaio: limpa na carga seguinte', array( consulta_leve_htaccess_recuperar(), sobras(), bytes(), consulta_leve_htaccess_estado()['ensaio'] ), array( true, array(), $wp, '' ) );
+// Sobra que não sai: recusa, guarda o nome e tenta de novo na aba.
+cenario( $wp, array( 'antes_de' => static function ( $n ) { 4 === $n && file_put_contents( glob( ABSPATH . 'wp-content/uploads/consulta-leve-ensaio-*' )[0] . '/foto.jpg', 'de outro' ); } ) ); // phpcs:ignore
+confere( 'sobra no ensaio: recusa sem tocar a raiz', array( consulta_leve_htaccess_aplicar( 'ligar' ), bytes(), $GLOBALS['t']['raiz_com_bloco'] ), array( 'ensaio_sobra', $wp, false ) );
+confere( 'sobra no ensaio: nome guardado', '' !== consulta_leve_htaccess_estado()['ensaio'], true );
+unlink( ABSPATH . 'wp-content/uploads/' . consulta_leve_htaccess_estado()['ensaio'] . '/foto.jpg' );
+consulta_leve_htaccess_revisar( true );
+confere( 'sobra no ensaio: sai depois', array( consulta_leve_htaccess_estado()['ensaio'], sobras(), situacao()[0] ), array( '', array(), 'recusado' ) );
 
 /* Processo morto no meio ------------------------------------------------------------------------ */
 
@@ -527,7 +648,7 @@ confere( 'mesmas escolhas: nada a fazer', consulta_leve_htaccess_sincronizar(), 
 consulta_leve_config_gravar( array( 'cab_hsts' => 'nao', 'cab_frame' => false ) );
 confere( 'muda escolhas: reescreve e confere', array( consulta_leve_htaccess_sincronizar(), bytes(), situacao()[0] ), array( 'ok', $com( $wp, consulta_leve_config() )['conteudo'], 'ativo' ) );
 confere( 'HSTS saiu do arquivo', strpos( bytes(), 'Strict-Transport' ), false );
-confere( 'sem XFO: sem pedido de quadro', $GLOBALS['t']['pedidos'], 6 + 5 );
+confere( 'sem XFO: sem pedido de quadro', $GLOBALS['t']['pedidos'], 10 + 9 );
 $GLOBALS['t']['servidor'] = 'erro';
 consulta_leve_config_gravar( array( 'cab_hsts' => 'ano' ) );
 confere( 'muda e falha: bloco antigo também sai', array( consulta_leve_htaccess_sincronizar(), bytes(), situacao()[0] ), array( 'erro_5xx', $wp, 'recusado' ) );
@@ -544,6 +665,32 @@ confere( 'desativar tira só o nosso', array( bytes(), situacao()[0], consulta_l
 cenario( $wp );
 call_user_func( $GLOBALS['t_desativar'] );
 confere( 'desativar sem bloco: nada', bytes(), $wp );
+// Desativar sem conseguir tirar: registra e avisa.
+cenario( $wp );
+consulta_leve_htaccess_aplicar( 'ligar' );
+consulta_leve_travar( 'htaccess', 60 );
+confere( 'desativar com trava alheia: insiste, desiste e registra', array( consulta_leve_htaccess_sair( 'desativar', 1 ), consulta_leve_registro()[0]['resultado'], bytes() ), array( 'ocupado', 'ocupado', $com( $wp )['conteudo'] ) );
+unset( $GLOBALS['cl_t']['opcoes'][ consulta_leve_trava_opcao( 'htaccess' ) ] );
+confere( 'desinstalar depois: tira', array( consulta_leve_htaccess_sair( 'desinstalar', 1 ), bytes(), consulta_leve_htaccess_sair( 'desinstalar', 1 ) ), array( 'ok', $wp, 'ok' ) );
+cenario( $wp );
+consulta_leve_htaccess_aplicar( 'ligar' );
+$GLOBALS['t']['mods']     = false;
+$GLOBALS['cl_t']['admin'] = true;
+call_user_func( $GLOBALS['t_desativar'] );
+confere( 'aviso só na volta à tela Plugins', apply_filters( 'wp_redirect', 'https://exemplo.test/' ), 'https://exemplo.test/' );
+$aviso = '';
+try {
+	apply_filters( 'wp_redirect', 'plugins.php?deactivate=true' );
+} catch ( \RuntimeException $e ) {
+	$aviso = $e->getMessage();
+}
+confere( 'aviso diz o motivo e como tirar', array( false !== strpos( $aviso, 'DISALLOW_FILE_MODS' ), false !== strpos( $aviso, '# BEGIN Consulta Leve até # END Consulta Leve' ), consulta_leve_registro()[0]['resultado'] ), array( true, true, 'bloqueado' ) );
+unset( $GLOBALS['cl_t']['ganchos']['wp_redirect'] );
+cenario( $outros );
+consulta_leve_htaccess_aplicar( 'ligar' );
+define( 'WP_UNINSTALL_PLUGIN', 'consulta-leve/consulta-leve.php' );
+require __DIR__ . '/../../consulta-leve/uninstall.php';
+confere( 'uninstall.php: só o bloco sai, opções ficam', array( bytes(), isset( $GLOBALS['cl_t']['opcoes'][ CONSULTA_LEVE_OPCAO_CONFIG ] ) ), array( $outros, true ) );
 cenario( $wp );
 consulta_leve_htaccess_aplicar( 'ligar' );
 $GLOBALS['t']['mods'] = false;
