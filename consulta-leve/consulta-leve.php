@@ -3,7 +3,7 @@
  * Plugin Name:       Consulta Leve
  * Plugin URI:        https://github.com/samuelmarmelo/consulta-leve
  * Description:       Consultas leves ao banco do WordPress para sites com milhares de posts: cache versionado, paginação por cursor, índices conferidos, busca enxuta e diagnóstico, sem conflitar com o que o tema já faz.
- * Version:           0.1.0
+ * Version:           0.2.0
  * Requires at least: 6.3
  * Requires PHP:      7.4
  * Author:            Samuel Neves
@@ -33,7 +33,7 @@ if ( defined( 'CONSULTA_LEVE_VERSAO' ) ) {
 	return;
 }
 
-define( 'CONSULTA_LEVE_VERSAO', '0.1.0' );
+define( 'CONSULTA_LEVE_VERSAO', '0.2.0' );
 define( 'CONSULTA_LEVE_ARQUIVO', __FILE__ );
 define( 'CONSULTA_LEVE_DIR', __DIR__ . '/' );
 

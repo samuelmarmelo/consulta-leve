@@ -3,7 +3,7 @@
 Formato: [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 Versões: [SemVer](https://semver.org/lang/pt-BR/).
 
-## [Não publicado]
+## [0.2.0] - 2026-11-25
 
 ### Adicionado
 - Cron real: chave opcional, desligada por padrão, que desliga o WP-Cron das
