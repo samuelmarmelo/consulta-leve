@@ -54,6 +54,7 @@ regras num plugin genérico:
 | Perfil de consultas | por cabeçalho | consultas por forma, N+1, EXPLAIN, quem chamou |
 | Cron real | desligado | com cron da hospedagem vivo, as visitas não disparam o WP-Cron; sem editar o `wp-config.php`, volta sozinho |
 | Cabeçalhos de segurança | desligado | `nosniff`, `Referrer-Policy`, `X-Frame-Options`, `upgrade-insecure-requests` e HSTS pelo PHP, sem trocar o que já existe |
+| Cabeçalhos no `.htaccess` | desligado | os mesmos, também em arquivo estático e cache de página (Apache ou LiteSpeed), com conferência e volta automática |
 | Diagnóstico do banco | ligado | cache de objetos, autoload, tabelas, revisões, cron, OPcache |
 
 Detalhes, formatos e ganchos: [`docs/CONTRATO.md`](docs/CONTRATO.md).
@@ -100,6 +101,27 @@ fora. O que o servidor ou a CDN já envia o PHP não enxerga; ligue num lugar
 só. HSTS com subdomínios e preload pede confirmação: alcança todos os
 subdomínios e é difícil de desfazer. `X-XSS-Protection` e
 `interest-cohort` ficam de fora por serem obsoletos.
+
+### Também no `.htaccess`
+
+Na mesma aba, com botão próprio e desligado por padrão. Só para o plugin
+próprio, em Apache ou LiteSpeed, fora de multisite e sem
+`DISALLOW_FILE_MODS`. Escreve um bloco entre `# BEGIN Consulta Leve` e
+`# END Consulta Leve`, antes do bloco do WordPress, sem mudar nenhum outro
+byte. Cada linha só vale se a resposta ainda não tem aquele cabeçalho.
+
+Depois de escrever, o plugin pede ao próprio site um arquivo e a página
+inicial: código diferente, erro, cabeçalho ausente, repetido ou trocado faz o
+arquivo voltar ao que era, e o PHP segue enviando. Desligar, mudar as escolhas
+ou desativar o plugin só mexe no próprio bloco. Com FTP ou SSH à mão: se o
+servidor parar no meio da conferência com o site em erro, rode
+`wp option get consulta_leve_htaccess` (qualquer comando do WP-CLI desfaz, até
+2 minutos depois) ou apague as linhas entre os marcadores.
+
+Não verificado num servidor de verdade: LiteSpeed e OpenLiteSpeed. Nesses, a
+conferência decide. Resposta de erro ou redirecionamento do próprio Apache
+(por exemplo, http para https por `mod_rewrite`) sai sem os cabeçalhos.
+Detalhes: contrato, seção 15.2.
 
 ## Para quem desenvolve o tema
 

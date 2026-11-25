@@ -21,6 +21,7 @@ Consultas leves ao banco do WordPress para sites com milhares de posts, sem conf
 * Rota REST de busca rápida com ETag e shortcode que funciona sem script.
 * Cron real opcional: desliga o WP-Cron das visitas sem editar o wp-config.php e volta sozinho se o cron da hospedagem parar.
 * Cabeçalhos de segurança opcionais, desligados por padrão, sem trocar o que o site já envia.
+* Os mesmos cabeçalhos também no .htaccess (Apache ou LiteSpeed), opcional: bloco próprio, conferência no site e volta automática.
 * Perfil de consultas por cabeçalho e diagnóstico do banco com recomendações.
 
 == Installation ==
