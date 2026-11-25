@@ -31,4 +31,8 @@ const admin = ler('consulta-leve/admin/admin.php');
 tem(admin, "function consulta_leve_admin_cron(): void {\n\t\tconsulta_leve_admin_conferir( 'cron' );", 'nonce e permissão antes de tudo');
 tem(admin, "consulta_leve_registrar( 'cron_real', $operacao, $resultado );", 'ação registrada');
 tem(admin, 'consulta_leve_config_do_formulario( $recebido )', 'formulário geral pula as chaves próprias');
+const diag = ler('consulta-leve/diagnostico/diagnostico.php');
+const fimDoCache = diag.indexOf("array( 'ttl' => 300 )");
+assert.ok(fimDoCache > 0 && diag.lastIndexOf("$d['cron_estado'] ") > fimDoCache && diag.lastIndexOf("$d['recomendacoes'] ") > fimDoCache, 'cron e recomendações fora do cache do diagnóstico');
+assert.ok(!diag.includes("'cron_estado'     =>"), 'cron não volta para dentro do cache');
 console.log('cron: ok');
