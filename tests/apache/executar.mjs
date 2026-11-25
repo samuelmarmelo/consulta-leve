@@ -5,7 +5,7 @@
 // e motivo gravados), não os passos internos do plugin. Todos os contêineres
 // usam a rede do hospedeiro: o endereço do site vale igual para o PHP, para o
 // WP-CLI e para este script.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -76,7 +76,7 @@ async function ate(nome, segundos, fn) {
 
 let geracao = 0;
 
-function httpdConf({ override, headers }) {
+function httpdConf({ override, headers, uploads }) {
   const pasta = variante === 'fpm' ? '/usr/local/apache2/modules' : '/usr/lib/apache2/modules';
   const modulos = ['unixd', 'authz_core', 'dir', 'mime', 'env', 'setenvif', 'alias', 'rewrite', 'ssl'];
   if (headers) modulos.push('headers');
@@ -105,6 +105,7 @@ function httpdConf({ override, headers }) {
     `Redirect 410 /__cl_geracao_${geracao}`,
     '<Directory />\nAllowOverride None\nRequire all denied\n</Directory>',
     `<Directory ${WP}>\nOptions FollowSymLinks\nAllowOverride ${override}\nRequire all granted\n</Directory>`,
+    ...(uploads ? [`<Directory ${WP}/wp-content/uploads>\nAllowOverride ${uploads}\n</Directory>`] : []),
     '<Files ".ht*">\nRequire all denied\n</Files>',
     `<FilesMatch "\\.php$">\nSetHandler ${variante === 'fpm' ? '"proxy:fcgi://127.0.0.1:9000"' : 'application/x-httpd-php'}\n</FilesMatch>`,
     'SSLSessionCache none',
@@ -115,11 +116,11 @@ function httpdConf({ override, headers }) {
 
 let confAtual = '';
 
-async function configurar({ override = 'All', headers = true } = {}) {
-  const chave = JSON.stringify({ override, headers });
+async function configurar({ override = 'All', headers = true, uploads = '' } = {}) {
+  const chave = JSON.stringify({ override, headers, uploads });
   if (chave === confAtual) return;
   geracao++;
-  fs.writeFileSync(path.join(conf, 'httpd.conf'), httpdConf({ override, headers }));
+  fs.writeFileSync(path.join(conf, 'httpd.conf'), httpdConf({ override, headers, uploads }));
   if (confAtual) {
     const binario = variante === 'fpm' ? 'httpd' : 'apache2';
     docker(['exec', apache, binario, '-f', '/cl-conf/httpd.conf', '-t']);
@@ -227,6 +228,42 @@ function escrever(conteudo, { dono = 'www-data:www-data', modo = '644' } = {}) {
 function estado() {
   const texto = docker(['exec', 'cl-cli', 'wp', '--skip-plugins', 'option', 'get', 'consulta_leve_htaccess', '--format=json'], { tolerar: true });
   return texto ? JSON.parse(texto) : { estado: '', motivo: '' };
+}
+
+// Vence a trava da escrita sem esperar o prazo (o cenário 7 espera de verdade).
+const vencerTrava = () => sql("UPDATE wp_options SET option_value = CONCAT('1|', SUBSTRING_INDEX(option_value, '|', -1)) WHERE option_name LIKE 'consulta\\_leve\\_trava\\_%';");
+
+/** Roda fn pedindo o arquivo estático sem parar; devolve os códigos diferentes de 200. */
+async function vigiando(fn) {
+  let parar = false;
+  const ruins = [];
+  let total = 0;
+  const vigia = (async () => {
+    while (!parar) {
+      const s = await gif().then((r) => r.status, () => 0);
+      total++;
+      if (s !== 200) ruins.push(s);
+      await dormir(20);
+    }
+  })();
+  const r = await fn();
+  parar = true;
+  await vigia;
+  return { r, ruins, total };
+}
+
+/** Outro processo no mesmo arquivo; resolve quando ele está pronto. */
+async function outroProcesso(modo) {
+  const filho = spawn('docker', ['exec', '-u', 'www-data', 'cl-php', 'php', '/tmp/escritor.php', ALVO, modo]);
+  let saida = '';
+  filho.stdout.on('data', (d) => { saida += d; });
+  filho.stderr.on('data', (d) => { saida += d; });
+  const fim = new Promise((r) => filho.on('close', r));
+  await ate('outro processo', 15, () => saida.includes('pronto'));
+  return async () => {
+    await fim;
+    return saida.replace(/\s+/g, ' ').trim();
+  };
 }
 
 const mu = (nome) => {
@@ -345,6 +382,15 @@ async function cenario(id, nome, fn, { conteudo = ORIGINAL, apacheConf = {}, arq
 }
 
 async function todos() {
+  await cenario('00', 'instalação nova, sem mexer na pasta uploads', async (antes) => {
+    const r = await ligar();
+    console.log(`  resultado: ${r.aviso} ${estado().motivo}`);
+    ok(r.aviso === 'htaccess_ligado', `admin-post: ${r.aviso}`);
+    await desligar();
+    bytes('no fim', antes);
+  });
+  sh(`mkdir -p ${WP}/wp-content/uploads && chown www-data:www-data ${WP}/wp-content/uploads`);
+
   // Controle negativo, sem o plugin escrever: as armadilhas quebram mesmo e o
   // teste enxerga repetição. Confere também as duas tabelas do mod_headers.
   await cenario('0', 'as armadilhas dos cenários funcionam', async (antes) => {
@@ -446,14 +492,42 @@ async function todos() {
     });
   }
 
+  for (const [id, linha] of [['5c', 'Header always set X-Frame-Options "DENY"'], ['5d', 'Header set X-Frame-Options "DENY"']]) {
+    for (const onde of ['antes', 'depois']) {
+      const deles = Buffer.from(`${linha}\n`);
+      await cenario(`${id} ${onde}`, `dono do site já tem "${linha.split(' X-')[0]}" no .htaccess, ${onde} do bloco`, async (antes) => {
+        const inicial = await gif();
+        const r = await ligar();
+        console.log(`  resultado: ${r.aviso} ${estado().motivo}`);
+        const certo = r.aviso === 'htaccess_ligado' ? so(SO_HTTP, { 'X-Frame-Options': 'DENY' }) : so(['X-Frame-Options'], { 'X-Frame-Options': 'DENY' });
+        ok(inicial.cab['x-frame-options']?.join() === 'DENY', 'o servidor já mandava DENY');
+        cabecalhos('estático', await gif(), certo);
+        const h = (await home()).cab['x-frame-options'] || [];
+        ok(r.aviso !== 'htaccess_ligado' || h.join() === 'DENY', `página inicial: X-Frame-Options ${JSON.stringify(h)}`);
+        await desligar();
+        bytes('no fim', antes);
+      }, { conteudo: onde === 'antes' ? Buffer.concat([deles, ORIGINAL]) : Buffer.concat([ORIGINAL, deles]) });
+    }
+  }
+
   await cenario('6a', 'servidor não aceita Header no .htaccess (500 de verdade)', async (antes) => {
-    const r = await ligar();
+    const { r, ruins, total } = await vigiando(ligar);
+    ok(ruins.length === 0, `visitante durante a tentativa: ${ruins.length} de ${total} pedidos fora de 200`);
     ok(r.aviso === 'htaccess_recusado', `admin-post: ${r.aviso}`);
     recusado(/^erro_5xx$|canari/);
     bytes('restaurado', antes);
     await siteNoAr('depois');
     cabecalhos('página inicial (PHP)', await home(), so(SO_HTTP));
   }, { conteudo: Buffer.from('# BEGIN WordPress\n# END WordPress\n'), apacheConf: { override: 'Indexes' } });
+
+  await cenario('6d', 'ensaio passa, mas a raiz não aceita (500 depois da escrita)', async (antes) => {
+    const { r, ruins, total } = await vigiando(ligar);
+    console.log(`  visitante durante a tentativa: ${ruins.length} de ${total} pedidos fora de 200`);
+    ok(r.aviso === 'htaccess_recusado', `admin-post: ${r.aviso}`);
+    recusado(/^erro_5xx$/);
+    bytes('restaurado', antes);
+    await siteNoAr('depois');
+  }, { conteudo: Buffer.from('# BEGIN WordPress\n# END WordPress\n'), apacheConf: { override: 'Indexes', uploads: 'All' } });
 
   await cenario('6b', 'página inicial quebra quando o bloco aparece', async (antes) => {
     mu('erro-com-bloco');
@@ -485,7 +559,7 @@ async function todos() {
     await siteNoAr('com o bloco pendente');
     cabecalhos('página inicial pendente', await home(), so(SO_HTTP));
     const inicio = Date.now();
-    await ate('painel desfazer a escrita', 240, async () => {
+    await ate('painel desfazer a escrita', 420, async () => {
       await pedir(`${base}/wp-admin/index.php`, { cookies: sessao });
       if (estado().estado !== 'pendente') return true;
       await dormir(5000);
@@ -507,8 +581,11 @@ async function todos() {
       ok(estado().estado === 'pendente', `logo depois: estado ${estado().estado}`);
       const h = await home();
       ok(h.status === 500, `site em ${h.status} (limite declarado no contrato)`);
+      wpComPlugin('eval', 'echo 1;');
+      ok(estado().estado === 'pendente', 'com a trava valendo, o WP-CLI não mexe');
+      vencerTrava();
       const inicio = Date.now();
-      await ate('WP-CLI desfazer a escrita', 240, async () => {
+      await ate('WP-CLI desfazer a escrita', 60, async () => {
         wpComPlugin('eval', 'echo 1;');
         if (estado().estado !== 'pendente') return true;
         await dormir(5000);
@@ -519,7 +596,24 @@ async function todos() {
     }
     bytes('recuperado', antes);
     await siteNoAr('depois');
-  }, { conteudo: Buffer.from('# BEGIN WordPress\n# END WordPress\n'), apacheConf: { override: 'Indexes' } });
+  }, { conteudo: Buffer.from('# BEGIN WordPress\n# END WordPress\n'), apacheConf: { override: 'Indexes', uploads: 'All' } });
+
+  await cenario('7c', 'PHP morto no meio do ensaio, depois abre o painel', async (antes) => {
+    mu('matar-ensaio');
+    const r = await ligar().catch((e) => ({ status: 0, aviso: e.message }));
+    ok(r.status !== 302, `o pedido morreu (${r.status} ${r.aviso})`);
+    ok(sh('cat /tmp/cl-morto', { tolerar: true }) !== '', 'processo do PHP morto com SIGKILL');
+    muFora('matar-ensaio');
+    bytes('logo depois', antes);
+    console.log(`  restos: ${listarHt().split('\n').filter((l) => l.includes('ensaio')).join(' ')}`);
+    await siteNoAr('com o ensaio pendente');
+    vencerTrava();
+    await pedir(`${base}/wp-admin/index.php`, { cookies: sessao });
+    recusado(/^interrompido$/);
+    ok(sh(`find ${WP}/wp-content/uploads -name '*ensaio*'`) === '', 'nada do ensaio ficou em uploads');
+    bytes('recuperado', antes);
+    await siteNoAr('depois');
+  });
 
   await cenario('8', 'desativar o plugin tira só o nosso bloco', async (antes) => {
     ok((await ligar()).aviso === 'htaccess_ligado', 'ligado');
@@ -537,6 +631,49 @@ async function todos() {
     wpComPlugin('plugin', 'activate', 'consulta-leve');
   });
   wpComPlugin('plugin', 'activate', 'consulta-leve');
+
+  await cenario('8b', 'desativar com a escrita ocupada avisa; desinstalar tira o bloco', async (antes) => {
+    ok((await ligar()).aviso === 'htaccess_ligado', 'ligado');
+    if (!ativo()) return;
+    const comBloco = ler();
+    sql("INSERT INTO wp_options (option_name, option_value, autoload) VALUES ('consulta_leve_trava_htaccess', CONCAT(UNIX_TIMESTAMP() + 600, '|teste'), 'off');");
+    const lista = await pedir(`${base}/wp-admin/plugins.php`, { cookies: sessao });
+    const link = (lista.corpo.match(/<a\b[^>]*href="[^"]*action=deactivate[^"]*consulta-leve[^"]*"/g) || []).map((t) => atributo(t, 'href'))[0];
+    const r = await pedir(new URL(link, `${base}/wp-admin/`).href, { cookies: sessao });
+    ok(r.status === 200 && r.corpo.includes('continua no .htaccess'), `desativação avisa que o bloco ficou (${r.status})`);
+    ok(!wp('option', 'get', 'active_plugins', '--format=json').includes('consulta-leve'), 'plugin inativo mesmo assim');
+    ok(igual(ler(), comBloco), 'bloco ainda no arquivo, sem mudança');
+    await siteNoAr('plugin inativo, bloco no arquivo');
+    sql("DELETE FROM wp_options WHERE option_name = 'consulta_leve_trava_htaccess';");
+    docker(['exec', 'cl-cli', 'wp', 'plugin', 'uninstall', 'consulta-leve', '--skip-delete']);
+    bytes('depois de desinstalar', antes);
+    ok(wp('option', 'get', 'consulta_leve_htaccess', '--format=json') !== '', 'opções ficaram (soft delete)');
+    await siteNoAr('depois');
+  });
+  wpComPlugin('plugin', 'activate', 'consulta-leve');
+
+  await cenario('11', 'outro processo com o arquivo aberto durante a troca', async (antes) => {
+    const fim = await outroProcesso('concorrer');
+    const r = await ligar();
+    const saida = await fim();
+    console.log(`  outro processo: ${saida}; resultado ${r.aviso}`);
+    ok(saida.includes('escreveu'), 'o outro processo escreveu');
+    ok(igual(ler(), Buffer.concat([antes, Buffer.from('# linha de outro processo\n')])), 'a linha do outro processo ficou e o resto é igual');
+    recusado(/^mudou$/);
+    await siteNoAr('depois');
+  });
+
+  await cenario('11b', 'outro processo segurando a trava do arquivo', async (antes) => {
+    const fim = await outroProcesso('segurar');
+    const r = await ligar();
+    ok(r.aviso === 'htaccess_recusado', `admin-post: ${r.aviso}`);
+    recusado(/^ocupado$/);
+    bytes('recusado', antes);
+    await fim();
+    ok((await ligar()).aviso === 'htaccess_ligado', 'solta a trava, liga normalmente');
+    await desligar();
+    bytes('depois de desligar', antes);
+  });
 
   const CRLF = Buffer.from(
     [
@@ -666,6 +803,9 @@ async function preparar() {
   wp('option', 'update', 'permalink_structure', '/%postname%/');
   wp('rewrite', 'flush');
   docker(['exec', 'cl-cli', 'wp', 'plugin', 'activate', 'consulta-leve']);
+  console.log(`pasta uploads na instalação nova: ${sh(`ls -ld ${WP}/wp-content/uploads`, { tolerar: true }) || 'não existe'}`);
+  docker(['cp', path.join(aqui, 'escritor.php'), 'cl-php:/tmp/escritor.php']);
+  sh('chmod 644 /tmp/escritor.php');
   escrever(ORIGINAL);
   const r1 = await home();
   if (r1.status !== 200) throw new Error(`página inicial respondeu ${r1.status}`);
