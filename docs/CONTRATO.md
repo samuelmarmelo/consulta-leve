@@ -582,8 +582,8 @@ Header set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on' &
 tabela e repetiria o cabeçalho na outra. Por isso: `Header set` na tabela
 `onsuccess` (a última) com `resp()`, que lê as duas. Conferido no código do
 Apache (`mod_headers.c`, `util_expr_eval.c`, de 2.4.6 ao ramo 2.4.x) e na
-documentação, que traz `expr=` como condição; **não** rodado num Apache de
-verdade neste repositório. Custo aceito: resposta de erro ou redirecionamento
+documentação, que traz `expr=` como condição; rodado em Apache 2.4 com mod_php
+e com PHP-FPM (`tests/apache/`, seção 16). Custo aceito: resposta de erro ou redirecionamento
 gerada pelo próprio Apache (403 de arquivo, 301 de `mod_rewrite`) sai sem os
 cabeçalhos; as geradas pelo WordPress saem com eles.
 
@@ -672,6 +672,12 @@ contratos estáticos `tests/validate-*-contract.js` e testes PHP sem
 WordPress em `tests/php/` (stubs em `tests/php/stubs.php`). Teste de
 verdade no Playground central (`tools/local/central.mjs`, porta 9470) com
 a semente de 6 mil posts.
+
+`tests/apache/executar.mjs` (workflow `apache`, só no GitHub Actions): a
+seção 15.2 em Apache 2.4 + WordPress + MariaDB de verdade, com mod_php e com
+PHP-FPM. Confere resultado (bytes do arquivo, respostas, estado e motivo), não
+passos internos. Fora: LiteSpeed, proxy ou CDN na frente, multisite, cache de
+página e versões antigas do Apache.
 
 ## 17. Reuso
 
