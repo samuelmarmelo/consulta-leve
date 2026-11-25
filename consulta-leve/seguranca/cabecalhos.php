@@ -2,9 +2,10 @@
 /**
  * Cabeçalhos de segurança opcionais (contrato, seção 15.1).
  *
- * Tudo desligado por padrão e enviado pelo PHP, nunca por `.htaccess` nem por
- * configuração do servidor. Complementar: cabeçalho que já está na resposta
- * nunca é trocado, e o tema pode dispensar o módulo inteiro.
+ * Tudo desligado por padrão e enviado pelo PHP. Este arquivo não toca nada do
+ * servidor; o `.htaccess` opcional fica em `seguranca/htaccess.php` (15.2).
+ * Complementar: cabeçalho que já está na resposta nunca é trocado, e o tema
+ * pode dispensar o módulo inteiro.
  *
  * @package ConsultaLeve
  */
@@ -121,6 +122,10 @@ if ( ! function_exists( 'consulta_leve_cabecalhos_lista' ) ) {
 		// Incorporações (oEmbed) e a prévia do Personalizar abrem em quadro.
 		$em_quadro = is_embed() || is_customize_preview();
 		$lista     = consulta_leve_cabecalhos_lista( consulta_leve_config(), is_ssl(), headers_list(), $em_quadro );
+		// Com o bloco do .htaccess ativo e conferido, o servidor manda o que ele cobre.
+		if ( function_exists( 'consulta_leve_htaccess_ajustar' ) ) {
+			$lista = consulta_leve_htaccess_ajustar( $lista, $em_quadro );
+		}
 		foreach ( $lista as $nome => $valor ) {
 			header( $nome . ': ' . $valor, false );
 		}

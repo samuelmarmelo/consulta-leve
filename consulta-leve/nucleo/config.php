@@ -50,6 +50,7 @@ if ( ! function_exists( 'consulta_leve_config_padrao' ) ) {
 			'cab_frame'       => false,
 			'cab_upgrade'     => false,
 			'cab_hsts'        => 'nao',
+			'cab_htaccess'    => false,
 		);
 	}
 
@@ -86,6 +87,7 @@ if ( ! function_exists( 'consulta_leve_config_padrao' ) ) {
 			'cab_frame'       => array( 'bool' ),
 			'cab_upgrade'     => array( 'bool' ),
 			'cab_hsts'        => array( 'escolha', array( 'nao', 'ano', 'ano_preload' ) ),
+			'cab_htaccess'    => array( 'bool' ),
 		);
 	}
 
@@ -174,7 +176,7 @@ if ( ! function_exists( 'consulta_leve_config_padrao' ) ) {
 	 * @return string[]
 	 */
 	function consulta_leve_config_chaves_proprias(): array {
-		return array( 'cron_real', 'cab_nosniff', 'cab_referrer', 'cab_frame', 'cab_upgrade', 'cab_hsts' );
+		return array( 'cron_real', 'cab_nosniff', 'cab_referrer', 'cab_frame', 'cab_upgrade', 'cab_hsts', 'cab_htaccess' );
 	}
 
 	/**

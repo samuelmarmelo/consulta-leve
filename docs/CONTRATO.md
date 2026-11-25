@@ -90,6 +90,7 @@ de chaves, tipos e limites). Chaves:
 | `cab_frame` | bool | false | `X-Frame-Options` (15.1) |
 | `cab_upgrade` | bool | false | `Content-Security-Policy: upgrade-insecure-requests` (15.1) |
 | `cab_hsts` | `nao` ou `ano` ou `ano_preload` | `nao` | `Strict-Transport-Security` (15.1) |
+| `cab_htaccess` | bool | false | os mesmos cabeçalhos também no `.htaccess` (15.2) |
 
 `consulta_leve_config_chaves_proprias()` lista as chaves com formulário e
 conferência próprios (`cron_real` e as `cab_*`): o formulário geral do painel nunca as
@@ -129,6 +130,7 @@ aplicar duas vezes:
 | Monitor | some quando o Query Monitor está ativo |
 | Cron real | `DISABLE_WP_CRON` já definida, com qualquer valor: o plugin não interfere; cópia embutida nunca define |
 | Cabeçalhos de segurança | cabeçalho já presente na resposta (sem diferenciar maiúsculas) nunca é trocado nem repetido |
+| Cabeçalhos no `.htaccess` | cada linha só vale se a resposta ainda não tem o cabeçalho (`-z resp(...)`); só o bloco próprio muda |
 
 Dispensa explícita (o tema diz "este eu já faço"):
 
@@ -396,7 +398,8 @@ WordPress), motor (MySQL, MariaDB ou SQLite), cache de objetos (tipo e
 o Redis mal configurado que custou 1 s por pedido no CRM interno),
 OPcache, `DISABLE_WP_CRON` (`cron_desligado`, bool; `cron_origem`: `''`,
 `wp_config` para wp-config.php ou outro código, `plugin` para este plugin;
-`cron_estado`, ver 10.4), `WP_POST_REVISIONS`, opções com autoload
+`cron_estado`, ver 10.4), estado dos cabeçalhos no `.htaccess`
+(`htaccess`, ver 15.2), `WP_POST_REVISIONS`, opções com autoload
 (quantidade, KB e as 10 maiores), tamanho e linhas das tabelas `posts`,
 `postmeta`, `options`, `comments`, `termmeta`, `usermeta`, revisões,
 rascunhos automáticos, lixeira, transients vencidos, estado dos índices e
@@ -481,7 +484,7 @@ Nunca automáticos. Lista fechada de candidatos, cada um com tabela, nome
 ## 12. Painel (`admin/admin.php`)
 
 Ferramentas, Consulta Leve (`manage_options`), abas: Diagnóstico, Índices,
-Busca, Cabeçalhos (formulário próprio), Configurações (com a seção Cron real, de formulário próprio).
+Busca, Cabeçalhos (formulário próprio e seção `.htaccess` com outro nonce), Configurações (com a seção Cron real, de formulário próprio).
 Formulários por `admin-post` com nonce próprio por
 ação; texto de usuário escapado; mensagens por código curto (nada da URL
 vira texto). Estilo do admin do WordPress (`widefat`, `notice`), sem
@@ -508,13 +511,15 @@ automática só depois de 48 h, sem token.
 - Nenhum segredo no repositório; nenhuma chamada externa além do
   atualizador.
 - Sem `eval`, sem `base64_decode`, sem drop-in, sem mexer em `wp-config.php`.
+- Arquivo do servidor: só o `.htaccess`, só por clique, só o bloco próprio
+  (15.2), depois de um ensaio numa pasta temporária própria de uploads.
+  Nenhum outro.
 
 ### 15.1 Cabeçalhos de segurança (`seguranca/cabecalhos.php`)
 
 Opcionais, todos desligados por padrão, enviados pelo PHP na ação
-`send_headers` (prioridade 999), só no site (nunca no painel). Nada de
-`.htaccess`: uma linha `Header` sem mod_headers derruba o site com erro 500,
-no Nginx o arquivo não faz nada, e o plugin não toca arquivo do servidor.
+`send_headers` (prioridade 999), só no site (nunca no painel). O PHP é o
+caminho padrão; o `.htaccess` é um passo a mais, à parte (15.2).
 
 | Chave | Cabeçalho | Condição |
 |---|---|---|
@@ -536,7 +541,7 @@ no Nginx o arquivo não faz nada, e o plugin não toca arquivo do servidor.
   o ignoram e nos antigos ele abria falhas) e
   `Permissions-Policy: interest-cohort` (o recurso FLoC foi removido dos
   navegadores).
-- **Limites.** Arquivo estático, página servida por cache que não passa pelo
+- **Limites (sem o bloco da 15.2).** Arquivo estático, página servida por cache que não passa pelo
   PHP, `wp-login.php`, painel, REST e `admin-ajax.php` não recebem os
   cabeçalhos. Cache de página inteira pode guardar a resposta sem eles:
   limpe o cache depois de ligar. O PHP não enxerga cabeçalho posto pelo
@@ -545,6 +550,152 @@ no Nginx o arquivo não faz nada, e o plugin não toca arquivo do servidor.
   Desligar o HSTS só para de enviar: o navegador guarda a regra até o fim
   do prazo. Em multisite, a configuração é de cada site, mas o HSTS com
   subdomínios alcança os outros sites do domínio.
+
+### 15.2 Cabeçalhos no `.htaccess` (`seguranca/htaccess.php`)
+
+Opcional, desligado por padrão (`cab_htaccess`), ligado e desligado por
+botão próprio na aba Cabeçalhos. Escreve os cabeçalhos escolhidos na 15.1
+também no `.htaccess`, para alcançar arquivo estático e cache de página
+inteira. É a única exceção à regra de não tocar arquivo do servidor;
+`wp-config.php` continua intocável.
+
+**Bloco.** Entre `# BEGIN Consulta Leve` e `# END Consulta Leve`,
+imediatamente antes de `# BEGIN WordPress` (sem esse marcador, no topo,
+depois do BOM se houver), tudo dentro de `<IfModule mod_headers.c>`. Gerado
+só da lista fechada das `cab_*`: nenhum texto digitado chega ao arquivo.
+
+```apache
+# BEGIN Consulta Leve
+# Gerado pelo plugin; mude as escolhas no painel.
+<IfModule mod_headers.c>
+Header set X-Content-Type-Options "nosniff" "expr=-z resp('X-Content-Type-Options')"
+Header set Referrer-Policy "strict-origin-when-cross-origin" "expr=-z resp('Referrer-Policy')"
+Header set X-Frame-Options "SAMEORIGIN" "expr=-z resp('X-Frame-Options') && -z resp('X-Consulta-Leve-Quadro') && -z resp('X-WP-embed')"
+Header set Content-Security-Policy "upgrade-insecure-requests" "expr=%{HTTPS} == 'on' && -z resp('Content-Security-Policy')"
+Header set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on' && -z resp('Strict-Transport-Security')"
+</IfModule>
+# END Consulta Leve
+```
+
+**As duas tabelas do Apache.** O mod_headers roda primeiro a tabela
+`always` e depois a `onsuccess`. Cabeçalho do PHP por CGI ou FPM fica em
+`always`; pelo mod_php, em `onsuccess`. `setifempty` olha só a própria
+tabela e repetiria o cabeçalho na outra. Por isso: `Header set` na tabela
+`onsuccess` (a última) com `resp()`, que lê as duas. Conferido no código do
+Apache (`mod_headers.c`, `util_expr_eval.c`, de 2.4.6 ao ramo 2.4.x) e na
+documentação, que traz `expr=` como condição; **não** rodado num Apache de
+verdade neste repositório. Custo aceito: resposta de erro ou redirecionamento
+gerada pelo próprio Apache (403 de arquivo, 301 de `mod_rewrite`) sai sem os
+cabeçalhos; as geradas pelo WordPress saem com eles.
+
+- `%{HTTPS}` é do núcleo do Apache. Atrás de proxy que termina o HTTPS ela
+  vale `off`: se HSTS ou CSP estiverem marcados num site HTTPS assim, a
+  conferência recusa o bloco e o PHP continua cuidando.
+- `X-Frame-Options` fica fora de incorporações e da prévia do Personalizar:
+  nesses casos o PHP manda `X-Consulta-Leve-Quadro: 1` e a linha não vale.
+  Página de incorporação guardada por cache sem os cabeçalhos do PHP perde
+  essa marca.
+- **LiteSpeed: não verificado.** O OpenLiteSpeed não lê `Header` do
+  `.htaccess` sem módulo à parte, e há relato de condição ignorada. Quem
+  decide é a conferência: sem cabeçalho, com repetição ou com condição
+  ignorada, o bloco sai.
+
+**Quem recusa antes de tocar** (`consulta_leve_htaccess_recusa( $fatos )`):
+`embutida`, `permissao`, `multisite`, `servidor` (só Apache e LiteSpeed por
+`SERVER_SOFTWARE`), `bloqueado` (`DISALLOW_FILE_MODS`), `dispensado` (4),
+`sem_escolha` (nenhuma `cab_*`), `caminho` (a pasta precisa ser a do
+WordPress ou uma acima dela), `link` (link simbólico), `nao_arquivo`,
+`tamanho` (acima de 128 KB), `sem_leitura`, `sem_escrita` (arquivo e pasta
+precisam de escrita), `ensaio_local` (uploads fora da pasta do WordPress, em
+outro endereço, sem escrita ou sem acesso pela web). E o conteúdo:
+`marcadores` (nosso marcador repetido, sem par, fora de ordem, escrito de
+outro jeito ou com outro marcador dentro), `marcador_wp` (`# BEGIN WordPress`
+repetido), `secao` (o ponto de entrada está dentro de um `<...>` aberto),
+`continuacao` (linha anterior termina em barra invertida) e `binario`.
+
+**Escrita.** Funções puras: `consulta_leve_htaccess_bloco()`,
+`consulta_leve_htaccess_com_bloco()` e `consulta_leve_htaccess_sem_bloco()`;
+tudo fora dos marcadores fica igual byte a byte, e a quebra de linha segue a
+do arquivo. Ordem: trava `htaccess` (3.4, 300 s; o pior caso são 12 pedidos de
+5 s), leitura, estado `pendente`, cópia em `consulta_leve_htaccess_copia` (sem
+autoload, em hexadecimal com SHA-256, relida antes de seguir), bloco antigo
+nosso fora (só ao mudar escolhas), ensaio, respostas de base e escrita. A cópia
+sai quando o estado fica conferido ou desfeito; só fica em `pendente` e com
+motivo `volta_*`.
+
+**Ensaio** (`seguranca/ensaio.php`). Antes de tocar o arquivo do site: pasta
+`consulta-leve-ensaio-<32 hex>` em uploads, com `ensaio.txt` e, conferido que
+ele abre pelo site (200 e o mesmo texto), um `.htaccess` com o bloco idêntico; e
+a subpasta `sonda`, com os mesmos nomes valendo `consulta-leve-sonda` na tabela
+`always` e o bloco depois. O primeiro tem de trazer cada cabeçalho uma vez; o
+segundo, só a sonda. Falhou: recusa, e o arquivo do site nem é aberto para
+escrita. A pasta sai sempre (nome no estado antes de criar; também no fim do
+processo e na próxima carga do painel), apagando só os quatro arquivos que o
+plugin criou nela; se não sair, recusa com `ensaio_sobra`. O ensaio não garante
+a raiz (um `AllowOverride` pode ser diferente por pasta): por isso a conferência
+abaixo continua.
+
+**Troca.** Só atômica: temporário na mesma pasta e `rename`, com dono, grupo e
+permissões iguais; não deu, `sem_escrita`, nunca escrita por cima. O arquivo
+original fica com `flock( LOCK_EX )` da comparação ao `rename` (a mesma trava do
+`insert_with_markers`); conteúdo ou arquivo diferente do lido, `mudou`; trava
+alheia por mais de 2 s, `ocupado`. Quem já tinha o arquivo aberto e escreveu no
+antigo depois do `rename` é percebido 0,2 s depois: a mudança dele volta para o
+lugar e a nossa é recusada (processo parado por mais tempo entre abrir e travar
+não é percebido). No Windows o arquivo é fechado logo antes do `rename`, porque
+ele não troca arquivo aberto. ACL e atributos estendidos não são conferidos. Arquivo que
+não existia nasce vazio, com criação exclusiva, e recebe o conteúdo pelo
+`rename`.
+
+**Conferência.** Por `wp_remote_get` ao próprio site, sem seguir
+redirecionamento, com endereço único. Antes de escrever: página inicial e
+`wp-includes/images/blank.gif`, as duas com 200. Depois, na ordem, parando
+no primeiro erro: o arquivo estático (tem cada cabeçalho) e a página inicial
+em três modos, pedidos por `X-Consulta-Leve-Conferencia: modo:token` (token
+aleatório, só com o estado `pendente`; resposta sem cache e com o modo de
+volta em `X-Consulta-Leve-Conferencia`):
+
+| Modo | O PHP envia | Tem de dar |
+|---|---|---|
+| `silencio` | nada | cada cabeçalho uma vez, pelo servidor |
+| `sonda` | os mesmos nomes com `consulta-leve-sonda` | só a sonda, uma vez: o servidor não troca nem repete |
+| `quadro` | só a marca de quadro | sem `X-Frame-Options` nosso |
+
+Cabeçalho de terceiros visto antes tem de continuar, na mesma quantidade e
+sem virar o nosso. Código diferente, 5xx, sem resposta, sem eco, ausente,
+repetido, trocado ou fora da condição: volta tudo, confere de novo e
+registra o motivo.
+
+**Volta.** Se o arquivo ainda é o que o plugin escreveu, voltam os bytes da
+cópia (sem bloco nosso; arquivo que não existia é removido). Se alguém mexeu
+no meio, sai só o nosso bloco. Processo morto: `register_shutdown_function`
+desfaz; se nem isso rodou, a marca `pendente` é conferida no `admin_init`, no
+WP-CLI e no wp-cron.php chamado de fora, e desfeita quando a trava estiver
+livre (até 5 minutos). **Limite:** com o ensaio, o arquivo do site só erra se a
+raiz aceitar menos que uploads; se nesse instante o processo for morto, o
+painel não abre e a volta é pelo WP-CLI ou à mão (apagar as linhas de
+`# BEGIN Consulta Leve` a `# END Consulta Leve`).
+
+**Estados** (opção `consulta_leve_htaccess`, com autoload; painel e
+diagnóstico): `desligado`, `pendente`, `ativo` (ativo e conferido) e
+`recusado` com `motivo`. Só em `ativo`, e com servidor Apache ou LiteSpeed, o
+PHP deixa de mandar os nomes em `cobertos`. A cada hora, no painel, o plugin
+confere se o bloco ainda está lá igual (`bloco_sumiu`) e se o servidor é do
+mesmo tipo (`servidor`); se não, o estado vira `recusado` e o PHP volta.
+
+**Desligar, mudar opções, desativar.** Salvar a aba com o bloco ativo
+reescreve e confere de novo; falhou, o bloco sai inteiro e o PHP volta a
+mandar. Desligar, desativar e desinstalar (`uninstall.php`) tiram só o nosso
+bloco; opções e tabelas ficam. Desativar insiste 3 s se a trava estiver
+ocupada; se o bloco ficar, registra e mostra o motivo e como tirar à mão (na
+volta à tela Plugins, ou aviso no WP-CLI; em outros meios, só o registro).
+Nada disso toca outro marcador. Com `DISALLOW_FILE_MODS` o plugin não tira o bloco sozinho (exceto
+uma escrita pendente dele mesmo): o painel explica. O bloco vale também para
+painel, `wp-login.php`, REST e arquivos: onde o núcleo já manda o cabeçalho,
+fica o do núcleo. Escolhas mudadas só pelo filtro `consulta_leve_config` não
+chegam ao arquivo. Registro: `htaccess`, `ligar`, `desligar`, `salvar`,
+`desativar`, `desinstalar`,
+`desfazer` ou `revisar`.
 
 ## 16. Testes
 

@@ -68,6 +68,8 @@ if ( ! function_exists( 'consulta_leve_modulos' ) ) {
 			'atualizacao/atualizador.php',
 			'cron/cron.php',
 			'seguranca/cabecalhos.php',
+			'seguranca/ensaio.php',
+			'seguranca/htaccess.php',
 		);
 		if ( is_admin() ) {
 			$modulos[] = 'admin/admin.php';

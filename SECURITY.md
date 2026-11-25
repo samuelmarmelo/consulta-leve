@@ -45,10 +45,26 @@ pelas versões assinadas (ver `docs/ATUALIZADOR.md`).
   também roda os eventos vencidos, e sem sinal por 60 minutos o WP-Cron das
   visitas volta.
 - **Cabeçalhos de segurança só por escolha.** Todos desligados por padrão,
-  valores fixos no código, nunca trocam cabeçalho existente nem tocam
-  arquivo do servidor. HSTS com subdomínios e preload exige confirmação.
-  Não alcançam arquivo estático nem cache que não passa pelo PHP.
-- **Nenhuma chamada externa** além do atualizador, que lê o GitHub sem
+  valores fixos no código, nunca trocam cabeçalho existente. HSTS com
+  subdomínios e preload exige confirmação. Pelo PHP não alcançam arquivo
+  estático nem cache que não passa por ele.
+- **`.htaccess` é o único arquivo do servidor que o plugin escreve, e só por
+  clique** (nonce próprio + `manage_options`), desligado por padrão. Só o
+  bloco entre os marcadores da Consulta Leve, gerado de lista fechada: nenhum
+  texto digitado chega ao arquivo. Marcador repetido, sem par ou alterado,
+  link simbólico, multisite, outro servidor ou `DISALLOW_FILE_MODS`: recusa
+  sem tocar. Guarda os bytes de antes numa opção sem autoload (apagada
+  depois de conferir), ensaia o bloco numa pasta temporária de uploads antes
+  de tocar o arquivo, troca só por `rename` com o arquivo travado e dono,
+  grupo e permissões iguais, pede o próprio site para conferir e volta tudo se algo
+  sair diferente. O pedido de conferência leva um token aleatório que só muda
+  quais cabeçalhos aquela resposta tem e só vale durante a escrita; a conferência do
+  certificado segue o filtro `https_local_ssl_verify`, como o WordPress nos
+  pedidos a si mesmo. Se o servidor matar o processo nesses segundos com o
+  arquivo gerando erro 500, o painel não abre até a volta pelo WP-CLI, pelo
+  cron por linha de comando ou à mão.
+- **Nenhuma chamada externa** além do atualizador (a conferência do
+  `.htaccess` só pede o próprio site), que lê o GitHub sem
   token e sem o endereço do site.
 
 ## Cadeia de entrega

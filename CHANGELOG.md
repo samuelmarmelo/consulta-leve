@@ -16,6 +16,10 @@ Versões: [SemVer](https://semver.org/lang/pt-BR/).
   pelo PHP: `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options`,
   `Content-Security-Policy: upgrade-insecure-requests` e HSTS. Cabeçalho já
   presente nunca é trocado; o tema dispensa com `cabecalhos`.
+- Os mesmos cabeçalhos também no `.htaccess` (`cab_htaccess`), opcional e
+  desligado por padrão, em Apache ou LiteSpeed: bloco próprio de lista
+  fechada, ensaio em pasta à parte, cópia, conferência por pedidos ao próprio site, volta automática e
+  retomada de escrita interrompida. Estado no painel e no diagnóstico.
 
 ### Alterado
 - O formulário geral do painel não muda chaves com formulário próprio.
