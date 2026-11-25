@@ -110,13 +110,17 @@ próprio, em Apache ou LiteSpeed, fora de multisite e sem
 `# END Consulta Leve`, antes do bloco do WordPress, sem mudar nenhum outro
 byte. Cada linha só vale se a resposta ainda não tem aquele cabeçalho.
 
-Depois de escrever, o plugin pede ao próprio site um arquivo e a página
-inicial: código diferente, erro, cabeçalho ausente, repetido ou trocado faz o
+Antes, o plugin ensaia o mesmo bloco numa pasta temporária de uploads e só
+segue se o servidor aceitar; a pasta some no fim. Depois de escrever, pede ao
+próprio site um arquivo e a página inicial: código diferente, erro, cabeçalho ausente, repetido ou trocado faz o
 arquivo voltar ao que era, e o PHP segue enviando. Desligar, mudar as escolhas
-ou desativar o plugin só mexe no próprio bloco. Com FTP ou SSH à mão: se o
-servidor parar no meio da conferência com o site em erro, rode
-`wp option get consulta_leve_htaccess` (qualquer comando do WP-CLI desfaz, até
-2 minutos depois) ou apague as linhas entre os marcadores.
+ou desativar o plugin só mexe no próprio bloco.
+
+**Volta à mão.** Se o site ficar em erro depois de ligar, ou se o plugin avisar
+que o bloco ficou: abra o `.htaccess` por FTP ou SSH e apague as linhas de
+`# BEGIN Consulta Leve` até `# END Consulta Leve`, incluindo as duas. Com WP-CLI,
+qualquer comando (por exemplo `wp option get consulta_leve_htaccess`) desfaz uma
+escrita interrompida, até 5 minutos depois.
 
 Não verificado num servidor de verdade: LiteSpeed e OpenLiteSpeed. Nesses, a
 conferência decide. Resposta de erro ou redirecionamento do próprio Apache

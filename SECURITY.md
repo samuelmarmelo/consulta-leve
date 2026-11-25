@@ -53,8 +53,10 @@ pelas versões assinadas (ver `docs/ATUALIZADOR.md`).
   bloco entre os marcadores da Consulta Leve, gerado de lista fechada: nenhum
   texto digitado chega ao arquivo. Marcador repetido, sem par ou alterado,
   link simbólico, multisite, outro servidor ou `DISALLOW_FILE_MODS`: recusa
-  sem tocar. Guarda os bytes de antes numa opção sem autoload, confere o hash
-  antes de escrever, pede o próprio site para conferir e volta tudo se algo
+  sem tocar. Guarda os bytes de antes numa opção sem autoload (apagada
+  depois de conferir), ensaia o bloco numa pasta temporária de uploads antes
+  de tocar o arquivo, troca só por `rename` com o arquivo travado e dono,
+  grupo e permissões iguais, pede o próprio site para conferir e volta tudo se algo
   sair diferente. O pedido de conferência leva um token aleatório que só muda
   quais cabeçalhos aquela resposta tem e só vale durante a escrita; a conferência do
   certificado segue o filtro `https_local_ssl_verify`, como o WordPress nos
