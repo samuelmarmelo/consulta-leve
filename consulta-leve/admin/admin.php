@@ -2,7 +2,7 @@
 /**
  * Painel: Ferramentas, Consulta Leve (contrato, seção 12).
  *
- * Abas Diagnóstico, Índices, Busca e Configurações. Toda ação vai por
+ * Abas Diagnóstico, Índices, Busca, Cabeçalhos e Configurações. Toda ação vai por
  * admin-post com nonce próprio e `manage_options`; a volta traz só um código
  * curto, traduzido por uma lista fechada (nada da URL vira texto). Estilo
  * do próprio admin do WordPress, sem enfeite.
@@ -76,6 +76,7 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 			'cron_sem_batida' => array( 'warning', __( 'Nada mudou: nenhum cron externo chamou este site nos últimos 30 minutos. Crie a tarefa na hospedagem com a linha de exemplo, espere a primeira execução e tente de novo.', 'consulta-leve' ) ),
 			'cron_definida'   => array( 'warning', __( 'Nada mudou: DISABLE_WP_CRON já está definida no wp-config.php ou em outro código, e o plugin não interfere.', 'consulta-leve' ) ),
 			'cron_embutida'   => array( 'warning', __( 'Nada mudou: esta cópia está embutida em um tema ou plugin. O cron real só funciona com a Consulta Leve instalada como plugin próprio.', 'consulta-leve' ) ),
+			'hsts_confirmar'  => array( 'warning', __( 'O HSTS ficou como estava: a opção com subdomínios e preload só é salva com a caixa de confirmação marcada. O resto foi salvo.', 'consulta-leve' ) ),
 			'busca_falhou'    => array( 'error', __( 'Não foi possível criar a tabela de busca. Veja o log de erros do servidor.', 'consulta-leve' ) ),
 		);
 	}
@@ -197,6 +198,23 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 	}
 
 	/**
+	 * Salvar os cabeçalhos de segurança.
+	 *
+	 * @return void
+	 */
+	function consulta_leve_admin_cabecalhos(): void {
+		consulta_leve_admin_conferir( 'cabecalhos' );
+
+		$recebido   = isset( $_POST['cl'] ) && is_array( $_POST['cl'] ) ? wp_unslash( $_POST['cl'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- só caixas e escolha de lista fechada, saneadas na gravação.
+		$confirmado = ! empty( $_POST['confirmar_hsts'] );
+		$resultado  = consulta_leve_cabecalhos_do_formulario( $recebido, consulta_leve_config_sanitizar( get_option( CONSULTA_LEVE_OPCAO_CONFIG, array() ) ), $confirmado );
+
+		consulta_leve_config_gravar( $resultado['valores'] );
+		consulta_leve_registrar( 'config_salvar', 'cabecalhos', 'salvo' === $resultado['aviso'] ? 'ok' : $resultado['aviso'] );
+		consulta_leve_admin_voltar( 'cabecalhos', $resultado['aviso'] );
+	}
+
+	/**
 	 * Formulário de uma ação (botão com nonce).
 	 *
 	 * @param string $acao   Ação.
@@ -232,6 +250,7 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 			'diagnostico' => __( 'Diagnóstico', 'consulta-leve' ),
 			'indices'     => __( 'Índices', 'consulta-leve' ),
 			'busca'       => __( 'Busca', 'consulta-leve' ),
+			'cabecalhos'  => __( 'Cabeçalhos', 'consulta-leve' ),
 			'config'      => __( 'Configurações', 'consulta-leve' ),
 		);
 		$aba  = isset( $_GET['aba'] ) ? sanitize_key( wp_unslash( $_GET['aba'] ) ) : 'diagnostico'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- só escolhe a aba.
@@ -474,6 +493,9 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 				'nucleo'        => __( 'título, resumo e conteúdo (padrão do WordPress)', 'consulta-leve' ),
 				'titulo_resumo' => __( 'título e resumo', 'consulta-leve' ),
 				'titulo'        => __( 'só título', 'consulta-leve' ),
+				'nao'           => __( 'desligado', 'consulta-leve' ),
+				'ano'           => __( '1 ano, só este endereço', 'consulta-leve' ),
+				'ano_preload'   => __( '1 ano, todos os subdomínios e preload', 'consulta-leve' ),
 			);
 			echo '<select id="' . esc_attr( $id ) . '" name="' . esc_attr( $nome ) . '">';
 			foreach ( $regra[1] as $opcao ) {
@@ -497,6 +519,37 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 			echo '<p class="description">' . esc_html( $ajuda ) . '</p>';
 		}
 		echo '</td></tr>';
+	}
+
+	/**
+	 * Aba Cabeçalhos.
+	 *
+	 * @return void
+	 */
+	function consulta_leve_admin_aba_cabecalhos(): void {
+		if ( ! function_exists( 'consulta_leve_cabecalhos_lista' ) ) {
+			echo '<p>' . esc_html__( 'O módulo de cabeçalhos não está nesta cópia do plugin.', 'consulta-leve' ) . '</p>';
+			return;
+		}
+		if ( consulta_leve_dispensado( 'cabecalhos' ) ) {
+			echo '<div class="notice inline notice-info"><p>' . esc_html__( 'O tema ou outro código já cuida dos cabeçalhos e dispensou este módulo. As opções ficam paradas mesmo marcadas.', 'consulta-leve' ) . '</p></div>';
+		}
+
+		echo '<p style="max-width:56rem">' . esc_html__( 'Cabeçalhos de segurança enviados pelo PHP nas páginas do site. Cabeçalho que o tema, outro plugin ou o PHP já enviou não é trocado. Arquivos estáticos e páginas servidas por cache que não passa pelo PHP não recebem estes cabeçalhos; cabeçalhos postos pelo servidor (Apache, Nginx, CDN) o PHP não enxerga, então não ligue aqui o que já vem de lá.', 'consulta-leve' ) . '</p>';
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '"><input type="hidden" name="action" value="consulta_leve_cabecalhos">';
+		wp_nonce_field( 'consulta_leve_cabecalhos' );
+
+		echo '<table class="form-table" role="presentation"><tbody>';
+		consulta_leve_admin_campo( 'cab_nosniff', __( 'X-Content-Type-Options: nosniff', 'consulta-leve' ), __( 'O navegador não adivinha o tipo do arquivo.', 'consulta-leve' ) );
+		consulta_leve_admin_campo( 'cab_referrer', __( 'Referrer-Policy: strict-origin-when-cross-origin', 'consulta-leve' ), __( 'Outros sites recebem só o domínio de origem, não o endereço completo.', 'consulta-leve' ) );
+		consulta_leve_admin_campo( 'cab_frame', __( 'X-Frame-Options: SAMEORIGIN', 'consulta-leve' ), __( 'Outros sites não abrem suas páginas em quadro. Não ligue se páginas suas aparecem dentro de outro domínio. Incorporações do WordPress e a prévia do Personalizar ficam de fora.', 'consulta-leve' ) );
+		consulta_leve_admin_campo( 'cab_upgrade', __( 'Content-Security-Policy: upgrade-insecure-requests', 'consulta-leve' ), __( 'O navegador troca http por https nos recursos da página. Só em HTTPS e só se nenhuma Content-Security-Policy já foi enviada.', 'consulta-leve' ) );
+		consulta_leve_admin_campo( 'cab_hsts', __( 'Strict-Transport-Security (HSTS)', 'consulta-leve' ), __( 'O navegador só abre o site por HTTPS durante 1 ano. Só em HTTPS. Desligar aqui não apaga o que o navegador já guardou.', 'consulta-leve' ) );
+		echo '<tr><th scope="row">' . esc_html__( 'Confirmação do HSTS com subdomínios', 'consulta-leve' ) . '</th><td><label><input type="checkbox" name="confirmar_hsts" value="1"> ' . esc_html__( 'Entendo e quero a opção com subdomínios e preload', 'consulta-leve' ) . '</label><p class="description">' . esc_html__( 'Atenção: vale para todos os subdomínios, inclusive os que não são WordPress, e é difícil de desfazer. Subdomínio sem HTTPS deixa de abrir, e sair da lista de preload dos navegadores pode levar meses.', 'consulta-leve' ) . '</p></td></tr>';
+		echo '</tbody></table>';
+
+		submit_button( __( 'Salvar', 'consulta-leve' ) );
+		echo '</form>';
 	}
 
 	/**
@@ -615,6 +668,7 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 	add_action( 'admin_post_consulta_leve_salvar', 'consulta_leve_admin_salvar' );
 	add_action( 'admin_post_consulta_leve_medir', 'consulta_leve_admin_medir' );
 	add_action( 'admin_post_consulta_leve_indice', 'consulta_leve_admin_indice' );
+	add_action( 'admin_post_consulta_leve_cabecalhos', 'consulta_leve_admin_cabecalhos' );
 	add_action( 'admin_post_consulta_leve_cron', 'consulta_leve_admin_cron' );
 	add_action( 'admin_post_consulta_leve_busca', 'consulta_leve_admin_busca' );
 	add_filter( 'plugin_action_links_' . plugin_basename( CONSULTA_LEVE_ARQUIVO ), 'consulta_leve_admin_links' );

@@ -20,7 +20,7 @@ if ( ! function_exists( 'consulta_leve_metodos_dispensaveis' ) ) {
 	 * @return string[]
 	 */
 	function consulta_leve_metodos_dispensaveis(): array {
-		return array( 'argumentos', 'teto_global', 'primar_opcoes', 'busca', 'busca_noindex', 'busca_limite', 'indice_busca', 'rest', 'monitor', 'perfil' );
+		return array( 'argumentos', 'teto_global', 'primar_opcoes', 'busca', 'busca_noindex', 'busca_limite', 'indice_busca', 'rest', 'monitor', 'perfil', 'cabecalhos' );
 	}
 
 	/**
