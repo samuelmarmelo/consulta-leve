@@ -71,6 +71,11 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 			'indice_desconhecido' => array( 'error', __( 'Índice fora da lista. Nada foi feito.', 'consulta-leve' ) ),
 			'busca_iniciada'  => array( 'success', __( 'Reconstrução da tabela de busca iniciada. Ela continua sozinha em segundo plano.', 'consulta-leve' ) ),
 			'busca_desligada' => array( 'warning', __( 'Ligue a tabela de busca e escolha os tipos de conteúdo nas Configurações.', 'consulta-leve' ) ),
+			'cron_ligado'     => array( 'success', __( 'Cron real ligado. As visitas não disparam mais o WP-Cron enquanto o cron da hospedagem der sinal.', 'consulta-leve' ) ),
+			'cron_desligado'  => array( 'success', __( 'Cron real desligado. O WP-Cron volta a rodar nas visitas.', 'consulta-leve' ) ),
+			'cron_sem_batida' => array( 'warning', __( 'Nada mudou: nenhum cron externo chamou este site nos últimos 30 minutos. Crie a tarefa na hospedagem com a linha de exemplo, espere a primeira execução e tente de novo.', 'consulta-leve' ) ),
+			'cron_definida'   => array( 'warning', __( 'Nada mudou: DISABLE_WP_CRON já está definida no wp-config.php ou em outro código, e o plugin não interfere.', 'consulta-leve' ) ),
+			'cron_embutida'   => array( 'warning', __( 'Nada mudou: esta cópia está embutida em um tema ou plugin. O cron real só funciona com a Consulta Leve instalada como plugin próprio.', 'consulta-leve' ) ),
 			'busca_falhou'    => array( 'error', __( 'Não foi possível criar a tabela de busca. Veja o log de erros do servidor.', 'consulta-leve' ) ),
 		);
 	}
@@ -109,20 +114,8 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 		consulta_leve_admin_conferir( 'salvar' );
 
 		$recebido = isset( $_POST['cl'] ) && is_array( $_POST['cl'] ) ? wp_unslash( $_POST['cl'] ) : array(); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- saneado chave a chave por consulta_leve_config_sanitizar().
-		$novos    = array();
 
-		foreach ( consulta_leve_config_esquema() as $chave => $regra ) {
-			if ( 'bool' === $regra[0] ) {
-				$novos[ $chave ] = ! empty( $recebido[ $chave ] );
-			} elseif ( array_key_exists( $chave, $recebido ) ) {
-				$valor           = $recebido[ $chave ];
-				$novos[ $chave ] = is_array( $valor ) ? array_map( 'sanitize_text_field', $valor ) : sanitize_text_field( (string) $valor );
-			} elseif ( 'lista' === $regra[0] ) {
-				$novos[ $chave ] = array(); // Nenhuma caixa marcada.
-			}
-		}
-
-		consulta_leve_config_gravar( $novos );
+		consulta_leve_config_gravar( consulta_leve_config_do_formulario( $recebido ) );
 		consulta_leve_registrar( 'config_salvar', 'config', 'ok' );
 		consulta_leve_admin_voltar( 'config', 'salvo' );
 	}
@@ -174,6 +167,33 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 		$geracao = consulta_leve_busca_reconstruir_iniciar();
 		consulta_leve_busca_lote( $geracao, 0, 10 );
 		consulta_leve_admin_voltar( 'busca', 'busca_iniciada' );
+	}
+
+	/**
+	 * Ligar ou desligar o cron real.
+	 *
+	 * @return void
+	 */
+	function consulta_leve_admin_cron(): void {
+		consulta_leve_admin_conferir( 'cron' );
+
+		if ( isset( $_POST['operacao'] ) && 'ligar' === $_POST['operacao'] ) {
+			$operacao  = 'ligar';
+			$resultado = function_exists( 'consulta_leve_cron_pode_ligar' ) ? consulta_leve_cron_pode_ligar( consulta_leve_cron_situacao( true ) ) : 'embutida';
+			$aviso     = 'ok' === $resultado ? 'cron_ligado' : 'cron_' . $resultado;
+			if ( 'ok' === $resultado ) {
+				consulta_leve_config_gravar( array( 'cron_real' => true ) );
+			}
+		} else {
+			$operacao  = 'desligar';
+			$resultado = 'ok';
+			$aviso     = 'cron_desligado';
+			consulta_leve_config_gravar( array( 'cron_real' => false ) );
+		}
+
+		consulta_leve_registrar( 'cron_real', $operacao, $resultado );
+		consulta_leve_cache_tocar( 'diagnostico' );
+		consulta_leve_admin_voltar( 'config', $aviso );
 	}
 
 	/**
@@ -253,6 +273,24 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 	}
 
 	/**
+	 * Texto do DISABLE_WP_CRON: valor e quem o definiu.
+	 *
+	 * @param bool   $desligado O WP-Cron das visitas está desligado?
+	 * @param string $origem    '', plugin ou wp_config.
+	 * @return string
+	 */
+	function consulta_leve_admin_cron_rotulo( bool $desligado, string $origem ): string {
+		if ( 'plugin' === $origem ) {
+			return __( 'sim, por este plugin', 'consulta-leve' );
+		}
+		if ( 'wp_config' === $origem ) {
+			return $desligado ? __( 'sim, pelo wp-config.php ou outro código', 'consulta-leve' ) : __( 'não, definido como false no wp-config.php ou em outro código', 'consulta-leve' );
+		}
+
+		return $desligado ? __( 'sim', 'consulta-leve' ) : __( 'não', 'consulta-leve' );
+	}
+
+	/**
 	 * Aba Diagnóstico.
 	 *
 	 * @return void
@@ -278,7 +316,7 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 		$cache = ! empty( $d['cache']['externo'] ) ? sprintf( __( 'persistente, %s ms por leitura', 'consulta-leve' ), number_format_i18n( (float) $d['cache']['ms'], 2 ) ) : __( 'só da requisição (sem Redis ou Memcached)', 'consulta-leve' );
 		echo consulta_leve_admin_linha( __( 'Cache de objetos', 'consulta-leve' ), $cache ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo consulta_leve_admin_linha( __( 'OPcache', 'consulta-leve' ), ! empty( $d['opcache'] ) ? $sim : $nao ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-		echo consulta_leve_admin_linha( __( 'Cron real (DISABLE_WP_CRON)', 'consulta-leve' ), ! empty( $d['cron_desligado'] ) ? $sim : $nao ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		echo consulta_leve_admin_linha( __( 'Cron real (DISABLE_WP_CRON)', 'consulta-leve' ), consulta_leve_admin_cron_rotulo( ! empty( $d['cron_desligado'] ), (string) ( $d['cron_origem'] ?? '' ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		echo consulta_leve_admin_linha( __( 'Limite de revisões', 'consulta-leve' ), var_export( $d['revisoes_limite'] ?? true, true ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped,WordPress.PHP.DevelopmentFunctions.error_log_var_export
 		/* translators: 1: quantidade, 2: KB. */
 		echo consulta_leve_admin_linha( __( 'Opções com autoload', 'consulta-leve' ), sprintf( __( '%1$d opções, %2$s KB', 'consulta-leve' ), (int) ( $d['autoload']['n'] ?? 0 ), number_format_i18n( (float) ( $d['autoload']['kb'] ?? 0 ), 1 ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
@@ -510,6 +548,53 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 
 		submit_button( __( 'Salvar', 'consulta-leve' ) );
 		echo '</form>';
+
+		consulta_leve_admin_secao_cron();
+	}
+
+	/**
+	 * Seção Cron real (formulário próprio, fora do formulário geral).
+	 *
+	 * @return void
+	 */
+	function consulta_leve_admin_secao_cron(): void {
+		if ( ! function_exists( 'consulta_leve_cron_estado' ) ) {
+			return;
+		}
+
+		$s      = consulta_leve_cron_situacao( true );
+		$estado = consulta_leve_cron_estado( $s );
+		$batida = consulta_leve_cron_batida();
+		$textos = array(
+			'embutida'  => __( 'indisponível: esta cópia está embutida em um tema ou plugin', 'consulta-leve' ),
+			'definida'  => __( 'DISABLE_WP_CRON já definida no wp-config.php ou em outro código; o plugin não interfere', 'consulta-leve' ),
+			'desligado' => __( 'desligado: o WP-Cron roda nas visitas', 'consulta-leve' ),
+			'vencido'   => __( 'ligado, mas parado: sem cron externo há mais de 60 minutos, o WP-Cron das visitas voltou sozinho', 'consulta-leve' ),
+			'ativo'     => __( 'ligado: só o cron externo roda as tarefas', 'consulta-leve' ),
+		);
+
+		echo '<h2>' . esc_html__( 'Cron real', 'consulta-leve' ) . '</h2>';
+		echo '<p style="max-width:56rem">' . esc_html__( 'Desliga o disparo do WP-Cron nas visitas quando a hospedagem chama o wp-cron.php em horário fixo. O wp-config.php não é alterado. Se o cron da hospedagem parar por 60 minutos, ou se o plugin for desativado, o WP-Cron das visitas volta sozinho.', 'consulta-leve' ) . '</p>';
+		echo '<table class="widefat striped" style="max-width:56rem"><tbody>';
+		echo consulta_leve_admin_linha( __( 'Estado', 'consulta-leve' ), $textos[ $estado ] ?? $estado ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+		echo consulta_leve_admin_linha( __( 'Última execução externa', 'consulta-leve' ), $batida['em'] > 0 ? wp_date( 'd/m/Y H:i', $batida['em'] ) . ' (' . $batida['origem'] . ')' : __( 'nenhuma vista até agora', 'consulta-leve' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+		echo '</tbody></table><p></p>';
+
+		if ( ! $s['ligado'] && in_array( $estado, array( 'embutida', 'definida' ), true ) ) {
+			return;
+		}
+
+		if ( in_array( $estado, array( 'desligado', 'vencido' ), true ) ) {
+			echo '<p style="max-width:56rem">' . esc_html__( 'Crie esta tarefa no cron da hospedagem (a cada 5 minutos), sem acrescentar doing_wp_cron com valor ao endereço:', 'consulta-leve' ) . '</p>';
+			echo '<pre style="white-space:pre-wrap;max-width:56rem;background:#fff;border:1px solid #c3c4c7;padding:.75em">' . esc_html( consulta_leve_cron_linha() ) . '</pre>';
+			echo '<p style="max-width:56rem">' . esc_html__( 'Também vale rodar o wp-cron.php pelo PHP da hospedagem ou wp cron event run --due-now pelo WP-CLI. Ligar exige uma execução externa nos últimos 30 minutos. Em multisite, cada site precisa da própria tarefa.', 'consulta-leve' ) . '</p>';
+		}
+
+		if ( $s['ligado'] ) {
+			echo consulta_leve_admin_botao( 'cron', __( 'Desligar cron real', 'consulta-leve' ), array( 'operacao' => 'desligar' ) ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- montado com escape.
+		} else {
+			echo consulta_leve_admin_botao( 'cron', __( 'Ligar cron real', 'consulta-leve' ), array( 'operacao' => 'ligar' ), 'button button-primary' ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- montado com escape.
+		}
 	}
 
 	/**
@@ -530,6 +615,7 @@ if ( ! function_exists( 'consulta_leve_admin_menu' ) ) {
 	add_action( 'admin_post_consulta_leve_salvar', 'consulta_leve_admin_salvar' );
 	add_action( 'admin_post_consulta_leve_medir', 'consulta_leve_admin_medir' );
 	add_action( 'admin_post_consulta_leve_indice', 'consulta_leve_admin_indice' );
+	add_action( 'admin_post_consulta_leve_cron', 'consulta_leve_admin_cron' );
 	add_action( 'admin_post_consulta_leve_busca', 'consulta_leve_admin_busca' );
 	add_filter( 'plugin_action_links_' . plugin_basename( CONSULTA_LEVE_ARQUIVO ), 'consulta_leve_admin_links' );
 }

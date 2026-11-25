@@ -52,6 +52,7 @@ regras num plugin genérico:
 | Rota REST de busca rápida | desligado | resposta enxuta, cursor, cache de 60 s, ETag com 304 |
 | Índices em `wp_posts` e `wp_postmeta` | manual | só com clique, depois do EXPLAIN; nunca duplica índice existente |
 | Perfil de consultas | por cabeçalho | consultas por forma, N+1, EXPLAIN, quem chamou |
+| Cron real | desligado | com cron da hospedagem vivo, as visitas não disparam o WP-Cron; sem editar o `wp-config.php`, volta sozinho |
 | Diagnóstico do banco | ligado | cache de objetos, autoload, tabelas, revisões, cron, OPcache |
 
 Detalhes, formatos e ganchos: [`docs/CONTRATO.md`](docs/CONTRATO.md).
@@ -76,6 +77,19 @@ add_theme_support( 'consulta-leve', array( 'dispensar' => array( 'busca', 'monit
 
 As atualizações seguintes chegam pelo painel, conferidas por SHA-256 e
 assinatura Ed25519 (`docs/ATUALIZADOR.md`).
+
+## Cron real
+
+1. No cron da hospedagem, crie a tarefa a cada 5 minutos:
+   `*/5 * * * * curl -fsS -o /dev/null "https://seusite.com.br/wp-cron.php"`
+   (sem `doing_wp_cron` com valor no endereço).
+2. Espere a primeira execução e, em Ferramentas, Consulta Leve,
+   Configurações, clique em Ligar cron real.
+
+Se a tarefa parar por 60 minutos, ou se o plugin for desativado, o WP-Cron
+das visitas volta sozinho. Em multisite, cada site precisa da própria
+tarefa. Vale só para o plugin instalado como plugin próprio; se o
+`wp-config.php` já define `DISABLE_WP_CRON`, nada muda.
 
 ## Para quem desenvolve o tema
 

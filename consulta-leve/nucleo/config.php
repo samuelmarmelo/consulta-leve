@@ -44,6 +44,7 @@ if ( ! function_exists( 'consulta_leve_config_padrao' ) ) {
 			'rest_por_minuto' => 60,
 			'monitor'         => true,
 			'cache_ttl'       => 600,
+			'cron_real'       => false,
 		);
 	}
 
@@ -74,6 +75,7 @@ if ( ! function_exists( 'consulta_leve_config_padrao' ) ) {
 			'rest_por_minuto' => array( 'int', 10, 600 ),
 			'monitor'         => array( 'bool' ),
 			'cache_ttl'       => array( 'int', 30, 86400 ),
+			'cron_real'       => array( 'bool' ),
 		);
 	}
 
@@ -153,6 +155,42 @@ if ( ! function_exists( 'consulta_leve_config_padrao' ) ) {
 		}
 
 		return $limpa;
+	}
+
+	/**
+	 * Chaves com formulário e conferência próprios: o formulário geral do
+	 * painel nunca as muda (nem por campo forjado, nem por caixa ausente).
+	 *
+	 * @return string[]
+	 */
+	function consulta_leve_config_chaves_proprias(): array {
+		return array( 'cron_real' );
+	}
+
+	/**
+	 * Valores novos a partir do formulário geral do painel.
+	 *
+	 * @param array $recebido Campos recebidos, sem barras.
+	 * @return array<string,mixed> Para consulta_leve_config_gravar(), que saneia.
+	 */
+	function consulta_leve_config_do_formulario( array $recebido ): array {
+		$novos = array();
+
+		foreach ( consulta_leve_config_esquema() as $chave => $regra ) {
+			if ( in_array( $chave, consulta_leve_config_chaves_proprias(), true ) ) {
+				continue;
+			}
+			if ( 'bool' === $regra[0] ) {
+				$novos[ $chave ] = ! empty( $recebido[ $chave ] );
+			} elseif ( array_key_exists( $chave, $recebido ) ) {
+				$valor           = $recebido[ $chave ];
+				$novos[ $chave ] = is_array( $valor ) ? array_map( 'sanitize_text_field', $valor ) : sanitize_text_field( (string) $valor );
+			} elseif ( 'lista' === $regra[0] ) {
+				$novos[ $chave ] = array(); // Nenhuma caixa marcada.
+			}
+		}
+
+		return $novos;
 	}
 
 	/**

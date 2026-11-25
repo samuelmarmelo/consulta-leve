@@ -99,6 +99,16 @@ confere( 'PHP antigo', false !== strpos( $textos, 'PHP abaixo de 8.1' ), true );
 confere( 'drop-in ativo não é órfão', false === strpos( $textos, 'resto de um plugin' ), true );
 $orfao = array_replace_recursive( $base, array( 'cache' => array( 'dropin' => true ) ) );
 confere( 'drop-in órfão', false !== strpos( implode( ' ', array_column( consulta_leve_diag_recomendacoes( $orfao ), 'texto' ) ), 'resto de um plugin' ), true );
+
+$cron = static function ( array $campos ) use ( $base ) {
+	return consulta_leve_diag_recomendacoes( array_merge( $base, $campos ) );
+};
+$r_cron = $cron( array( 'cron_desligado' => false, 'cron_estado' => 'vencido' ) );
+confere( 'cron real vencido vira alerta, uma vez só', array( count( $r_cron ), $r_cron[0]['nivel'], false !== strpos( $r_cron[0]['texto'], 'mais de 60 minutos' ) ), array( 1, 'alerta', true ) );
+confere( 'cron desligado: dica aponta a chave', false !== strpos( $cron( array( 'cron_desligado' => false, 'cron_estado' => 'desligado' ) )[0]['texto'], 'ligue Cron real' ), true );
+confere( 'cópia embutida: dica antiga', false !== strpos( $cron( array( 'cron_desligado' => false, 'cron_estado' => 'embutida' ) )[0]['texto'], 'com DISABLE_WP_CRON' ), true );
+confere( 'cron real ativo: nada a apontar', $cron( array( 'cron_desligado' => true, 'cron_estado' => 'ativo' ) ), array() );
+confere( 'diagnóstico antigo, sem cron_estado: dica antiga', false !== strpos( $cron( array( 'cron_desligado' => false ) )[0]['texto'], 'com DISABLE_WP_CRON' ), true );
 confere( 'níveis só alerta e dica', array_values( array_unique( array_column( $r, 'nivel' ) ) ), array( 'alerta', 'dica' ) );
 
 cl_teste_fim( 'diagnostico' );

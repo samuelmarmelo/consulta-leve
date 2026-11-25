@@ -38,6 +38,12 @@ pelas versões assinadas (ver `docs/ATUALIZADOR.md`).
 - **Sem `eval`, sem `base64_decode`, sem `unserialize` de entrada, sem
   drop-in, sem mexer em `wp-config.php`.** O contrato
   `tests/validate-base-contract.js` falha se alguma dessas funções aparecer.
+- **Cron real sem risco de parar o site.** Desligado por padrão; liga só por
+  clique (nonce + `manage_options`) e com cron externo visto há menos de 30
+  minutos. Nunca altera arquivo nem constante já definida. O wp-cron.php é
+  público, então uma chamada anônima pode contar como sinal de vida; ela
+  também roda os eventos vencidos, e sem sinal por 60 minutos o WP-Cron das
+  visitas volta.
 - **Nenhuma chamada externa** além do atualizador, que lê o GitHub sem
   token e sem o endereço do site.
 

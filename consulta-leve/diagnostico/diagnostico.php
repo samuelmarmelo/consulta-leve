@@ -208,7 +208,14 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 		if ( $d['contagens']['revisoes'] > 5000 && ( true === $d['revisoes_limite'] || -1 === $d['revisoes_limite'] ) ) {
 			$dica( __( 'Há muitas revisões e o limite está aberto. Um limite no wp-config.php (por exemplo define( \'WP_POST_REVISIONS\', 10 );) segura o crescimento de wp_posts.', 'consulta-leve' ) );
 		}
-		if ( ! $d['cron_desligado'] ) {
+		$cron = (string) ( $d['cron_estado'] ?? '' );
+		if ( 'vencido' === $cron ) {
+			$alerta( __( 'O cron real está ligado, mas nenhum cron externo chama este site há mais de 60 minutos. O WP-Cron das visitas voltou sozinho; confira o cron da hospedagem.', 'consulta-leve' ) );
+		} elseif ( ! $d['cron_desligado'] && 'desligado' === $cron ) {
+			$dica( __( 'O WP-Cron roda nas visitas. Em site com tráfego ou em conta com vários WordPress, o cron real da hospedagem alivia o servidor: crie a tarefa a cada 5 minutos e ligue Cron real na aba Configurações, sem editar o wp-config.php.', 'consulta-leve' ) );
+		} elseif ( ! $d['cron_desligado'] && 'definida' === $cron ) {
+			$dica( __( 'O WP-Cron roda nas visitas porque o wp-config.php (ou outro código) define DISABLE_WP_CRON como false. O plugin não interfere: se quiser o cron real da hospedagem, mude essa linha.', 'consulta-leve' ) );
+		} elseif ( ! $d['cron_desligado'] ) {
 			$dica( __( 'O WP-Cron roda nas visitas. Em site com tráfego ou em conta com vários WordPress, o cron real da hospedagem com DISABLE_WP_CRON alivia o servidor.', 'consulta-leve' ) );
 		}
 		if ( $d['contagens']['transients'] > 1000 ) {
@@ -249,7 +256,6 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 					'motor'           => consulta_leve_diag_motor(),
 					'cache'           => consulta_leve_diag_cache(),
 					'opcache'         => function_exists( 'opcache_get_status' ) && is_array( @opcache_get_status( false ) ), // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- API restrita avisa.
-					'cron_desligado'  => defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON,
 					'revisoes_limite' => defined( 'WP_POST_REVISIONS' ) ? WP_POST_REVISIONS : true,
 					'autoload'        => consulta_leve_diag_autoload(),
 					'tabelas'         => consulta_leve_diag_tabelas(),
@@ -264,13 +270,22 @@ if ( ! function_exists( 'consulta_leve_diagnostico' ) ) {
 					}
 				}
 
-				$d['recomendacoes'] = consulta_leve_diag_recomendacoes( $d );
-
 				return $d;
 			},
 			array( 'ttl' => 300 )
 		);
 
-		return is_array( $d ) ? $d : array();
+		if ( ! is_array( $d ) || ! $d ) {
+			return array();
+		}
+
+		// Fora do cache: o cron real vence sozinho e o painel não pode dizer que
+		// ele está ativo depois disso.
+		$d['cron_desligado'] = defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON;
+		$d['cron_origem']    = function_exists( 'consulta_leve_cron_definido_por' ) ? consulta_leve_cron_definido_por() : ( defined( 'DISABLE_WP_CRON' ) ? 'wp_config' : '' );
+		$d['cron_estado']    = function_exists( 'consulta_leve_cron_estado' ) ? consulta_leve_cron_estado( consulta_leve_cron_situacao() ) : '';
+		$d['recomendacoes']  = consulta_leve_diag_recomendacoes( $d );
+
+		return $d;
 	}
 }

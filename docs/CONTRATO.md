@@ -84,6 +84,12 @@ de chaves, tipos e limites). Chaves:
 | `rest_por_minuto` | int 10 a 600 | 60 | pedidos por minuto por IP |
 | `monitor` | bool | true | contador na barra do admin (10.3) |
 | `cache_ttl` | int 30 a 86400 | 600 | TTL padrão do cache (6) |
+| `cron_real` | bool | false | desliga o WP-Cron das visitas com cron externo vivo (10.4) |
+
+`consulta_leve_config_chaves_proprias()` lista as chaves com formulário e
+conferência próprios (`cron_real`): o formulário geral do painel nunca as
+muda, nem por campo forjado, nem por caixa ausente.
+`consulta_leve_config_do_formulario()` monta os valores do formulário geral.
 
 ### 3.3 Coexistência (`nucleo/coexistencia.php`)
 
@@ -116,6 +122,7 @@ aplicar duas vezes:
 | `noindex` | `wp_robots` mescla arrays: repetir é inofensivo |
 | Perfil | cabeçalho próprio `X-Consulta-Leve-Perfil`; `SAVEQUERIES` só se ninguém definiu |
 | Monitor | some quando o Query Monitor está ativo |
+| Cron real | `DISABLE_WP_CRON` já definida, com qualquer valor: o plugin não interfere; cópia embutida nunca define |
 
 Dispensa explícita (o tema diz "este eu já faço"):
 
@@ -381,17 +388,66 @@ Só leitura. `consulta_leve_diagnostico()` devolve: versões (PHP, banco,
 WordPress), motor (MySQL, MariaDB ou SQLite), cache de objetos (tipo e
 **latência medida**: 20 idas e voltas; acima de 5 ms por ida, alerta, como
 o Redis mal configurado que custou 1 s por pedido no CRM interno),
-OPcache, `DISABLE_WP_CRON`, `WP_POST_REVISIONS`, opções com autoload
+OPcache, `DISABLE_WP_CRON` (`cron_desligado`, bool; `cron_origem`: `''`,
+`wp_config` para wp-config.php ou outro código, `plugin` para este plugin;
+`cron_estado`, ver 10.4), `WP_POST_REVISIONS`, opções com autoload
 (quantidade, KB e as 10 maiores), tamanho e linhas das tabelas `posts`,
 `postmeta`, `options`, `comments`, `termmeta`, `usermeta`, revisões,
 rascunhos automáticos, lixeira, transients vencidos, estado dos índices e
 da tabela de busca, e recomendações em texto. Cache de 5 min no painel,
-botão "Medir de novo".
+botão "Medir de novo". O estado do cron e as recomendações ficam fora do
+cache, porque o cron real vence sozinho (10.4).
 
 ### 10.3 Monitor (`diagnostico/monitor.php`)
 
 Item na barra do admin para `manage_options`: "N consultas, X ms".
 Some com o Query Monitor ativo.
+
+### 10.4 Cron real (`cron/cron.php`)
+
+Desliga o disparo do WP-Cron nas visitas sem tocar no `wp-config.php`.
+Desligado por padrão (`cron_real`).
+
+- **Constante.** Com a chave ligada, `DISABLE_WP_CRON` ainda não definida e
+  batida recente, o plugin define a constante como `true` na própria carga
+  (antes do `init`; o núcleo só a lê em `_wp_cron()`, no `wp_loaded` ou,
+  nas versões novas, no `shutdown`). A decisão lê a opção gravada, não o
+  filtro `consulta_leve_config`: nessa hora o tema e parte dos plugins ainda
+  não carregaram. Por isso o método também não entra em `dispensar`.
+- **Só plugin próprio**, pela mesma conferência do atualizador
+  (`consulta_leve_atualizador_plugin_proprio()`). Cópia embutida não
+  define a constante, não grava batida e não deixa ligar.
+- **Batida** (`consulta_leve_cron_batida`: `em`, `origem`): sinal de vida do
+  cron externo. Vale a requisição do wp-cron.php (`DOING_CRON`) com
+  `doing_wp_cron` ausente ou vazio (`http`, ou `cli` com `PHP_SAPI` igual a
+  `cli`) e o comando `wp cron event run` (`wp-cli`, gancho
+  `before_invoke:cron event run`). `spawn_cron()` sempre preenche
+  `doing_wp_cron`: parâmetro preenchido nunca conta, seja qual for o valor.
+  Gravada no `wp_loaded`, no máximo uma vez a cada 5 minutos.
+- **Custo.** A batida é uma opção pequena com autoload, separada da
+  configuração (gravação do cron não disputa com o painel). Ler não faz
+  consulta; com a chave desligada, nem é lida. Com cache de objetos
+  externo, cada gravação renova o `alloptions`: por isso o teto de uma a
+  cada 5 minutos.
+- **Ligar** exige batida nos últimos 30 minutos; sem ela, o painel recusa e
+  mostra a linha de exemplo, a cada 5 minutos, com
+  `site_url( 'wp-cron.php' )`.
+- **Volta sozinho.** Última batida com mais de 60 minutos: a constante não é
+  definida, o WP-Cron das visitas volta e o diagnóstico mostra um alerta.
+  Desativar o plugin tem o mesmo efeito já na requisição seguinte.
+- **Estados** (`consulta_leve_cron_estado()`): `embutida`, `definida`,
+  `desligado`, `vencido`, `ativo`. Só `ativo` define a constante.
+- **Multisite.** Chave e batida são de cada site. Cada site precisa da
+  própria tarefa na hospedagem: `wp-cron.php` de um site não roda os
+  eventos dos outros, e `wp cron event run --network` só conta para o site
+  em que o comando carregou.
+- **Limites.** O wp-cron.php é público: quem o chama sem o parâmetro conta
+  como externo. Isso não esconde cron parado, porque a própria chamada roda
+  os eventos vencidos, mas pode manter a chave valendo com um ritmo mais
+  lento que o esperado. Tarefa de hospedagem que preenche `doing_wp_cron`
+  não é reconhecida. Plugin carregado depois que defina `DISABLE_WP_CRON`
+  sem conferir gera um aviso do PHP. Registro em `consulta_leve_registro`
+  (`cron_real`, `ligar` ou `desligar`).
 
 ## 11. Índices (`indices/indices.php`)
 
@@ -419,7 +475,8 @@ Nunca automáticos. Lista fechada de candidatos, cada um com tabela, nome
 ## 12. Painel (`admin/admin.php`)
 
 Ferramentas, Consulta Leve (`manage_options`), abas: Diagnóstico, Índices,
-Busca, Configurações. Formulários por `admin-post` com nonce próprio por
+Busca, Configurações (com a seção Cron real, de formulário próprio).
+Formulários por `admin-post` com nonce próprio por
 ação; texto de usuário escapado; mensagens por código curto (nada da URL
 vira texto). Estilo do admin do WordPress (`widefat`, `notice`), sem
 enfeite.
