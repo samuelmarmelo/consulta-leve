@@ -1,0 +1,32 @@
+name: apache
+
+# Cabeçalhos no .htaccess em Apache 2.4 + WordPress de verdade (contrato, 15.2).
+on:
+  push:
+    branches: [test/apache-real]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  htaccess:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        php: [mod_php, fpm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: node tests/apache/executar.mjs ${{ matrix.php }}
