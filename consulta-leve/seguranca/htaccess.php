@@ -14,7 +14,7 @@ defined( 'ABSPATH' ) || exit;
 /** Estado (autoload ligado, pequeno). */
 const CONSULTA_LEVE_OPCAO_HTACCESS = 'consulta_leve_htaccess';
 
-/** Cópia do arquivo de antes da última escrita (sem autoload). */
+/** Cópia do arquivo de antes da escrita (sem autoload; só enquanto ela não foi conferida ou desfeita). */
 const CONSULTA_LEVE_OPCAO_HTACCESS_COPIA = 'consulta_leve_htaccess_copia';
 
 /** Marcadores do bloco próprio. */
@@ -24,8 +24,11 @@ const CONSULTA_LEVE_HTACCESS_FIM    = '# END Consulta Leve';
 /** Tamanho máximo do arquivo, em bytes. */
 const CONSULTA_LEVE_HTACCESS_MAX = 131072;
 
-/** Trava (s), limite de cada pedido da conferência (s) e intervalo da conferência no painel (s). */
-const CONSULTA_LEVE_HTACCESS_TRAVA_S   = 120;
+/**
+ * Trava (s), limite de cada pedido (s) e intervalo da conferência no painel (s).
+ * O pior caso são 12 pedidos (60 s): a trava fica cinco vezes acima disso.
+ */
+const CONSULTA_LEVE_HTACCESS_TRAVA_S   = 300;
 const CONSULTA_LEVE_HTACCESS_PEDIDO_S  = 5;
 const CONSULTA_LEVE_HTACCESS_REVISAO_S = 3600;
 
@@ -200,12 +203,12 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	/**
 	 * Motivo de recusa, antes de ler ou tocar o arquivo ('' = pode).
 	 *
-	 * @param array  $f     Fatos (ver consulta_leve_htaccess_fatos()).
-	 * @param string $nivel ligar, remover (só arquivo e trava de mudanças) ou desfazer (só arquivo).
+	 * @param array $f     Fatos (ver consulta_leve_htaccess_fatos()).
+	 * @param bool  $ligar Falso ao tirar o bloco: só o arquivo e a trava de mudanças contam.
 	 * @return string
 	 */
-	function consulta_leve_htaccess_recusa( array $f, string $nivel = 'ligar' ): string {
-		if ( 'ligar' === $nivel ) {
+	function consulta_leve_htaccess_recusa( array $f, bool $ligar = true ): string {
+		if ( $ligar ) {
 			foreach ( array( 'proprio' => 'embutida', 'pode' => 'permissao' ) as $fato => $motivo ) {
 				if ( empty( $f[ $fato ] ) ) {
 					return $motivo;
@@ -218,10 +221,10 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 				return 'servidor';
 			}
 		}
-		if ( 'desfazer' !== $nivel && ! empty( $f['bloqueado'] ) ) {
+		if ( ! empty( $f['bloqueado'] ) ) {
 			return 'bloqueado';
 		}
-		if ( 'ligar' === $nivel ) {
+		if ( $ligar ) {
 			if ( ! empty( $f['dispensado'] ) ) {
 				return 'dispensado';
 			}
@@ -247,7 +250,11 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			}
 		}
 
-		return empty( $f['escrita'] ) ? 'sem_escrita' : '';
+		if ( empty( $f['escrita'] ) ) {
+			return 'sem_escrita';
+		}
+
+		return $ligar && empty( $f['ensaio'] ) ? 'ensaio_local' : '';
 	}
 
 	/**
@@ -319,7 +326,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	/**
 	 * Confere uma resposta de depois da escrita.
 	 *
-	 * @param string               $tipo      estatico, silencio, sonda ou quadro.
+	 * @param string               $tipo      estatico, ensaio (estático com a sonda), silencio, sonda ou quadro.
 	 * @param array                $antes     Resposta do mesmo endereço antes da escrita.
 	 * @param array                $depois    Resposta de agora.
 	 * @param array<string,string> $esperados Cabeçalhos que valem neste endereço.
@@ -337,10 +344,11 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 		if ( (int) ( $antes['status'] ?? 0 ) !== $status ) {
 			return 'status_mudou';
 		}
-		if ( 'estatico' !== $tipo && array( $tipo ) !== ( $depois['cab']['x-consulta-leve-conferencia'] ?? array() ) ) {
+		if ( in_array( $tipo, array( 'silencio', 'sonda', 'quadro' ), true ) && array( $tipo ) !== ( $depois['cab']['x-consulta-leve-conferencia'] ?? array() ) ) {
 			return 'sem_eco';
 		}
 
+		$sonda = in_array( $tipo, array( 'sonda', 'ensaio' ), true );
 		foreach ( $nomes as $nome ) {
 			$ja    = array_values( (array) ( $antes['cab'][ strtolower( $nome ) ] ?? array() ) );
 			$agora = array_values( (array) ( $depois['cab'][ strtolower( $nome ) ] ?? array() ) );
@@ -348,7 +356,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 
 			if ( $ja ) {
 				// De terceiros: mesma quantidade (o valor pode variar por pedido) e nunca o nosso.
-				if ( 'sonda' === $tipo ) {
+				if ( $sonda ) {
 					continue; // O PHP não enxerga o que o servidor já punha: a sonda não diz nada aqui.
 				}
 				if ( count( $agora ) !== count( $ja ) ) {
@@ -359,7 +367,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 				}
 				continue;
 			}
-			if ( null === $nosso || ( 'quadro' === $tipo && 'X-Frame-Options' === $nome ) ) {
+			if ( ( null === $nosso && 'ensaio' !== $tipo ) || ( 'quadro' === $tipo && 'X-Frame-Options' === $nome ) ) {
 				if ( $agora ) {
 					return 'condicao';
 				}
@@ -371,7 +379,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			if ( count( $agora ) > 1 ) {
 				return 'duplicado';
 			}
-			if ( ( 'sonda' === $tipo ? CONSULTA_LEVE_HTACCESS_SONDA : $nosso ) !== $agora[0] ) {
+			if ( ( $sonda ? CONSULTA_LEVE_HTACCESS_SONDA : $nosso ) !== $agora[0] ) {
 				return 'trocado';
 			}
 		}
@@ -384,7 +392,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	/**
 	 * Estado gravado, normalizado.
 	 *
-	 * @return array{estado:string,motivo:string,em:int,visto:int,cobertos:string[],arquivo:string,existia:bool,token:string,sha_novo:string,sha_bloco:string}
+	 * @return array{estado:string,motivo:string,em:int,visto:int,cobertos:string[],arquivo:string,existia:bool,token:string,sha_novo:string,sha_bloco:string,ensaio:string}
 	 */
 	function consulta_leve_htaccess_estado(): array {
 		$e      = get_option( CONSULTA_LEVE_OPCAO_HTACCESS, array() );
@@ -405,26 +413,33 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			'token'     => $texto( 'token' ),
 			'sha_novo'  => $texto( 'sha_novo' ),
 			'sha_bloco' => $texto( 'sha_bloco' ),
+			'ensaio'    => $texto( 'ensaio' ),
 		);
 	}
 
 	/**
 	 * Grava o estado e a chave `cab_htaccess` (ligada só em pendente e ativo).
+	 * A cópia sai quando não há mais nada a desfazer.
 	 *
 	 * @param array $novos Campos novos; os ausentes ficam como estão.
 	 * @return array Estado gravado.
 	 */
 	function consulta_leve_htaccess_gravar_estado( array $novos ): array {
-		$e = array_merge( consulta_leve_htaccess_estado(), array( 'em' => time() ), $novos );
+		$antes = consulta_leve_htaccess_estado();
+		$e     = array_merge( $antes, array( 'em' => time() ), $novos );
+		$vivo  = in_array( $e['estado'], array( 'pendente', 'ativo' ), true );
 		if ( 'pendente' !== $e['estado'] ) {
 			$e['token']    = '';
 			$e['sha_novo'] = '';
 		}
-		if ( ! in_array( $e['estado'], array( 'pendente', 'ativo' ), true ) ) {
+		if ( ! $vivo ) {
 			$e['cobertos'] = array();
 		}
 		update_option( CONSULTA_LEVE_OPCAO_HTACCESS, $e, true );
-		consulta_leve_config_gravar( array( 'cab_htaccess' => in_array( $e['estado'], array( 'pendente', 'ativo' ), true ) ) );
+		consulta_leve_config_gravar( array( 'cab_htaccess' => $vivo ) );
+		if ( 'pendente' !== $e['estado'] && 0 !== strpos( $e['motivo'], 'volta_' ) && ( $antes['estado'] !== $e['estado'] || $antes['motivo'] !== $e['motivo'] ) ) {
+			delete_option( CONSULTA_LEVE_OPCAO_HTACCESS_COPIA );
+		}
 
 		return $e;
 	}
@@ -467,7 +482,9 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			'nao_arquivo'       => __( 'o .htaccess não é um arquivo comum', 'consulta-leve' ),
 			'tamanho'           => __( 'o .htaccess passa de 128 KB', 'consulta-leve' ),
 			'sem_leitura'       => __( 'o WordPress não consegue ler o .htaccess', 'consulta-leve' ),
-			'sem_escrita'       => __( 'o WordPress não consegue escrever o .htaccess', 'consulta-leve' ),
+			'sem_escrita'       => __( 'o WordPress não consegue trocar o .htaccess de uma vez só (pasta sem escrita, ou dono, grupo e permissões que não dá para manter)', 'consulta-leve' ),
+			'ensaio_local'      => __( 'o ensaio não pôde ser feito: a pasta de uploads precisa estar dentro do WordPress, no mesmo endereço, com escrita e acesso pela web', 'consulta-leve' ),
+			'ensaio_sobra'      => __( 'a pasta de ensaio em uploads não pôde ser removida; tire à mão a pasta consulta-leve-ensaio', 'consulta-leve' ),
 			'marcadores'        => __( 'os marcadores da Consulta Leve no .htaccess estão repetidos, sem par ou alterados; arrume à mão', 'consulta-leve' ),
 			'marcador_wp'       => __( 'o marcador # BEGIN WordPress aparece mais de uma vez', 'consulta-leve' ),
 			'secao'             => __( 'o marcador # BEGIN WordPress está dentro de outra seção do arquivo', 'consulta-leve' ),
@@ -553,7 +570,8 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			'arquivo'    => $existe && is_file( $arquivo ),
 			'tamanho'    => $existe && is_file( $arquivo ) ? (int) filesize( $arquivo ) : 0,
 			'leitura'    => $existe && is_readable( $arquivo ),
-			'escrita'    => '' !== $arquivo && ( $existe ? is_writable( $arquivo ) : is_writable( dirname( $arquivo ) ) ), // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable
+			'escrita'    => '' !== $arquivo && is_writable( dirname( $arquivo ) ) && ( ! $existe || is_writable( $arquivo ) ), // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_is_writable
+			'ensaio'     => function_exists( 'consulta_leve_htaccess_uploads' ) && '' !== consulta_leve_htaccess_uploads()['pasta'],
 		);
 	}
 
@@ -588,106 +606,144 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	}
 
 	/**
-	 * Escreve tudo num arquivo já aberto.
+	 * Cria um arquivo novo com o conteúdo todo.
 	 *
-	 * @param resource $h     Arquivo.
-	 * @param string   $bytes Conteúdo.
+	 * @param string $arquivo Caminho que não pode existir.
+	 * @param string $bytes   Conteúdo.
 	 * @return bool
 	 */
-	function consulta_leve_htaccess_despejar( $h, string $bytes ): bool {
-		$total = strlen( $bytes );
-		for ( $feito = 0; $feito < $total; $feito += $n ) {
-			$n = fwrite( $h, substr( $bytes, $feito ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
-			if ( false === $n || 0 === $n ) {
-				return false;
-			}
+	function consulta_leve_htaccess_criar( string $arquivo, string $bytes ): bool {
+		$h = @fopen( $arquivo, 'xb' ); // phpcs:ignore WordPress.WP.AlternativeFunctions, WordPress.PHP.NoSilencedErrors.Discouraged -- criação exclusiva; a falha é tratada.
+		if ( false === $h ) {
+			return false;
 		}
+		$ok = fwrite( $h, $bytes ) === strlen( $bytes ); // phpcs:ignore WordPress.WP.AlternativeFunctions -- arquivo local comum: escrita curta é falha.
+		$ok = fflush( $h ) && $ok;
 
-		return fflush( $h );
+		return fclose( $h ) && $ok; // phpcs:ignore WordPress.WP.AlternativeFunctions
 	}
 
 	/**
-	 * Troca o conteúdo do arquivo, só se ele ainda é o esperado.
+	 * Trava do sistema no arquivo aberto (a mesma que o núcleo usa ao gravar marcadores).
+	 *
+	 * @param resource $h Arquivo.
+	 * @return bool
+	 */
+	function consulta_leve_htaccess_flock( $h ): bool {
+		for ( $i = 0; $i < 20; $i++ ) {
+			if ( flock( $h, LOCK_EX | LOCK_NB ) ) {
+				return true;
+			}
+			usleep( 100000 );
+		}
+
+		return false;
+	}
+
+	/**
+	 * Troca o conteúdo do arquivo de uma vez só, se ele ainda é o esperado.
 	 *
 	 * @param string      $arquivo  Caminho já conferido.
 	 * @param string|null $esperado Bytes lidos antes (null: não existia).
 	 * @param string      $novo     Bytes novos.
-	 * @return string '' ou motivo (mudou, sem_escrita).
+	 * @return string '' ou motivo (mudou, ocupado, sem_escrita).
 	 */
 	function consulta_leve_htaccess_escrever( string $arquivo, ?string $esperado, string $novo ): string {
-		// phpcs:disable WordPress.WP.AlternativeFunctions, WordPress.PHP.NoSilencedErrors.Discouraged -- escrita atômica de um arquivo local; toda falha é tratada.
-		if ( consulta_leve_htaccess_ler( $arquivo ) !== $esperado ) {
+		if ( null !== $esperado ) {
+			return consulta_leve_htaccess_trocar( $arquivo, $esperado, $novo );
+		}
+
+		// Não existia: um arquivo vazio, inofensivo, guarda o lugar.
+		if ( ! consulta_leve_htaccess_criar( $arquivo, '' ) ) {
+			clearstatcache();
+			return file_exists( $arquivo ) || is_link( $arquivo ) ? 'mudou' : 'sem_escrita';
+		}
+		$motivo = consulta_leve_htaccess_trocar( $arquivo, '', $novo );
+		if ( '' !== $motivo && '' === consulta_leve_htaccess_ler( $arquivo ) ) {
+			@unlink( $arquivo ); // phpcs:ignore WordPress.WP.AlternativeFunctions,WordPress.PHP.NoSilencedErrors.Discouraged -- vazio e criado aqui.
+		}
+
+		return $motivo;
+	}
+
+	/**
+	 * Miolo da troca: temporário na mesma pasta e rename, com o arquivo travado
+	 * da comparação ao rename. Sem manter dono, grupo e permissões, recusa.
+	 *
+	 * @param string $arquivo  Caminho que existe.
+	 * @param string $esperado Bytes lidos antes.
+	 * @param string $novo     Bytes novos.
+	 * @return string '' ou motivo (mudou, ocupado, sem_escrita).
+	 */
+	function consulta_leve_htaccess_trocar( string $arquivo, string $esperado, string $novo ): string {
+		// phpcs:disable WordPress.WP.AlternativeFunctions, WordPress.PHP.NoSilencedErrors.Discouraged -- troca atômica de um arquivo local; toda falha é tratada.
+		clearstatcache();
+		if ( is_link( $arquivo ) || ! is_file( $arquivo ) ) {
 			return 'mudou';
 		}
-
-		// Arquivo novo: criação exclusiva.
-		if ( null === $esperado ) {
-			$h = @fopen( $arquivo, 'xb' );
-			if ( false === $h ) {
-				return file_exists( $arquivo ) ? 'mudou' : 'sem_escrita';
-			}
-			$ok = consulta_leve_htaccess_despejar( $h, $novo );
-			fclose( $h );
-			if ( ! $ok ) {
-				@unlink( $arquivo );
-				return 'sem_escrita';
-			}
-			return consulta_leve_htaccess_ler( $arquivo ) === $novo ? '' : 'sem_escrita';
-		}
-
-		// Temporário na mesma pasta (nome .ht*, que o Apache não serve) e rename.
-		$temp = dirname( $arquivo ) . '/.htaccess-consulta-leve-' . bin2hex( random_bytes( 8 ) ) . '.tmp';
-		$h    = is_writable( dirname( $arquivo ) ) ? @fopen( $temp, 'xb' ) : false;
-		if ( false !== $h ) {
-			$ok = consulta_leve_htaccess_despejar( $h, $novo );
-			fclose( $h );
-			$ok = $ok && fileowner( $temp ) === @fileowner( $arquivo ) && filegroup( $temp ) === @filegroup( $arquivo ) && @chmod( $temp, @fileperms( $arquivo ) & 0777 );
-			if ( $ok && consulta_leve_htaccess_ler( $arquivo ) !== $esperado ) {
-				@unlink( $temp );
-				return 'mudou';
-			}
-			if ( $ok && @rename( $temp, $arquivo ) ) {
-				return consulta_leve_htaccess_ler( $arquivo ) === $novo ? '' : 'sem_escrita';
-			}
-			@unlink( $temp );
-		}
-
-		// No próprio arquivo, com trava: dono diferente ou pasta sem escrita.
 		$h = @fopen( $arquivo, 'r+b' );
 		if ( false === $h ) {
 			return 'sem_escrita';
 		}
-		$travado = false;
-		for ( $i = 0; $i < 10 && ! $travado; $i++ ) {
-			$travado = flock( $h, LOCK_EX | LOCK_NB );
-			if ( ! $travado ) {
-				usleep( 100000 );
+		// Nome .ht*, que o Apache não serve.
+		$temp = dirname( $arquivo ) . '/.htaccess-consulta-leve-' . bin2hex( random_bytes( 8 ) ) . '.tmp';
+		try {
+			$de = fstat( $h );
+			if ( ! consulta_leve_htaccess_criar( $temp, $novo ) || ! @chmod( $temp, $de['mode'] & 07777 ) ) {
+				return 'sem_escrita';
+			}
+			clearstatcache();
+			$para = @stat( $temp );
+			foreach ( array( 'uid', 'gid', 'mode' ) as $campo ) {
+				if ( false === $para || $de[ $campo ] !== $para[ $campo ] ) {
+					return 'sem_escrita';
+				}
+			}
+
+			if ( ! consulta_leve_htaccess_flock( $h ) ) {
+				return 'ocupado';
+			}
+			clearstatcache();
+			$agora = @stat( $arquivo );
+			if ( stream_get_contents( $h ) !== $esperado || is_link( $arquivo ) || false === $agora || $agora['ino'] !== $de['ino'] ) {
+				return 'mudou';
+			}
+			if ( '\\' === DIRECTORY_SEPARATOR ) {
+				// O Windows não troca arquivo aberto: fecha logo antes. Se outro o tiver aberto, o rename falha.
+				fclose( $h );
+				$h = null;
+			}
+			if ( ! @rename( $temp, $arquivo ) ) {
+				return 'sem_escrita';
+			}
+			if ( null === $h ) {
+				return consulta_leve_htaccess_ler( $arquivo ) === $novo ? '' : 'mudou';
+			}
+			flock( $h, LOCK_UN );
+
+			// Quem abriu antes do rename e esperava a trava escreve no arquivo antigo:
+			// a mudança dele volta para o lugar e a nossa é recusada.
+			usleep( 200000 );
+			if ( consulta_leve_htaccess_flock( $h ) && rewind( $h ) ) {
+				$deles = stream_get_contents( $h );
+				if ( is_string( $deles ) && $deles !== $esperado ) {
+					consulta_leve_htaccess_trocar( $arquivo, $novo, $deles );
+					return 'mudou';
+				}
+			}
+		} finally {
+			if ( null !== $h ) {
+				flock( $h, LOCK_UN );
+				fclose( $h );
+			}
+			clearstatcache();
+			if ( file_exists( $temp ) ) {
+				@unlink( $temp );
 			}
 		}
-		if ( ! $travado ) {
-			fclose( $h );
-			return 'mudou';
-		}
-		$motivo = '';
-		if ( stream_get_contents( $h ) !== $esperado ) {
-			$motivo = 'mudou';
-		} elseif ( ! rewind( $h ) || ! consulta_leve_htaccess_despejar( $h, $novo ) || ! ftruncate( $h, strlen( $novo ) ) ) {
-			// Disco cheio ou parecido: põe de volta o que estava lá.
-			rewind( $h );
-			consulta_leve_htaccess_despejar( $h, $esperado );
-			ftruncate( $h, strlen( $esperado ) );
-			$motivo = 'sem_escrita';
-		}
-		fflush( $h );
-		flock( $h, LOCK_UN );
-		fclose( $h );
 		// phpcs:enable
 
-		if ( '' !== $motivo ) {
-			return $motivo;
-		}
-
-		return consulta_leve_htaccess_ler( $arquivo ) === $novo ? '' : 'sem_escrita';
+		return consulta_leve_htaccess_ler( $arquivo ) === $novo ? '' : 'mudou';
 	}
 
 	/**
@@ -729,13 +785,14 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	}
 
 	/**
-	 * Desfaz a escrita: bytes da cópia (sem bloco nosso) se o arquivo ainda é o
-	 * que escrevemos; senão, só o nosso bloco sai.
+	 * Tira o bloco próprio do arquivo.
 	 *
-	 * @param array $estado Estado do bloco.
+	 * @param array       $estado Estado do bloco.
+	 * @param string|null $copia  Bytes a usar no lugar dos atuais (só ao desfazer).
+	 * @param bool        $propria Desfazendo escrita própria: DISALLOW_FILE_MODS não impede.
 	 * @return string '' ou motivo.
 	 */
-	function consulta_leve_htaccess_desfazer( array $estado ): string {
+	function consulta_leve_htaccess_tirar( array $estado, ?string $copia = null, bool $propria = false ): string {
 		$arquivo = (string) $estado['arquivo'];
 		if ( '' === $arquivo ) {
 			return '';
@@ -747,21 +804,54 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 		if ( false === $atual ) {
 			return 'sem_leitura';
 		}
+		$limpo = consulta_leve_htaccess_sem_bloco( null !== $copia ? $copia : $atual );
+		$apaga = '' === $limpo['conteudo'] && ! $estado['existia'];
+		if ( '' !== $limpo['motivo'] || ( $limpo['conteudo'] === $atual && ! $apaga ) ) {
+			return $limpo['motivo'];
+		}
+		$motivo = $propria ? '' : consulta_leve_htaccess_recusa( consulta_leve_htaccess_fatos( $arquivo, array() ), false );
+		if ( '' !== $motivo ) {
+			return $motivo;
+		}
+		if ( $apaga ) {
+			return @unlink( $arquivo ) ? '' : 'sem_escrita'; // phpcs:ignore WordPress.WP.AlternativeFunctions,WordPress.PHP.NoSilencedErrors.Discouraged -- criado por este plugin e vazio sem o bloco.
+		}
 
-		if ( '' !== $estado['sha_novo'] && hash_equals( $estado['sha_novo'], hash( 'sha256', $atual ) ) ) {
-			if ( ! $estado['existia'] ) {
-				return @unlink( $arquivo ) ? '' : 'sem_escrita'; // phpcs:ignore WordPress.WP.AlternativeFunctions,WordPress.PHP.NoSilencedErrors.Discouraged -- arquivo criado por esta escrita.
+		return consulta_leve_htaccess_escrever( $arquivo, $atual, $limpo['conteudo'] );
+	}
+
+	/**
+	 * Desfaz a escrita: bytes da cópia se o arquivo ainda é o que escrevemos;
+	 * senão, só o nosso bloco sai.
+	 *
+	 * @param array $estado Estado do bloco.
+	 * @return string '' ou motivo.
+	 */
+	function consulta_leve_htaccess_desfazer( array $estado ): string {
+		$atual  = '' !== $estado['sha_novo'] && consulta_leve_htaccess_caminho_ok( $estado['arquivo'] ) ? consulta_leve_htaccess_ler( $estado['arquivo'] ) : null;
+		$intato = is_string( $atual ) && hash_equals( $estado['sha_novo'], hash( 'sha256', $atual ) );
+
+		return consulta_leve_htaccess_tirar( $estado, $intato ? consulta_leve_htaccess_copia( $estado['arquivo'] ) : null, true );
+	}
+
+	/**
+	 * Tira os restos próprios (pasta de ensaio e temporários da troca).
+	 *
+	 * @param array $estado Estado do bloco.
+	 * @return array{ensaio:string} Campo do estado: '' quando saiu tudo.
+	 */
+	function consulta_leve_htaccess_limpar( array $estado ): array {
+		if ( consulta_leve_htaccess_caminho_ok( $estado['arquivo'] ) ) {
+			foreach ( (array) glob( dirname( $estado['arquivo'] ) . '/.htaccess-consulta-leve-*.tmp' ) as $temp ) {
+				if ( 1 === preg_match( '/\.htaccess-consulta-leve-[0-9a-f]{16}\.tmp$/D', (string) $temp ) && is_file( $temp ) ) {
+					@unlink( $temp ); // phpcs:ignore WordPress.WP.AlternativeFunctions,WordPress.PHP.NoSilencedErrors.Discouraged -- temporário próprio.
+				}
 			}
-			$copia = consulta_leve_htaccess_copia( $arquivo );
-			$alvo  = consulta_leve_htaccess_sem_bloco( null !== $copia ? $copia : $atual );
-		} else {
-			$alvo = consulta_leve_htaccess_sem_bloco( $atual );
-		}
-		if ( '' !== $alvo['motivo'] ) {
-			return $alvo['motivo'];
 		}
 
-		return $alvo['conteudo'] === $atual ? '' : consulta_leve_htaccess_escrever( $arquivo, $atual, $alvo['conteudo'] );
+		$saiu = '' === $estado['ensaio'] || ( function_exists( 'consulta_leve_htaccess_ensaio_limpar' ) && consulta_leve_htaccess_ensaio_limpar( $estado['ensaio'] ) );
+
+		return array( 'ensaio' => $saiu ? '' : $estado['ensaio'] );
 	}
 
 	/* Conferência --------------------------------------------------------------- */
@@ -772,7 +862,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	 * @param string $url   Endereço.
 	 * @param string $modo  Modo da conferência.
 	 * @param string $token Token da escrita em andamento.
-	 * @return array{status:int,cab:array<string,string[]>} status 0 sem resposta.
+	 * @return array{status:int,cab:array<string,string[]>,corpo:string} status 0 sem resposta.
 	 */
 	function consulta_leve_htaccess_pedir( string $url, string $modo = '', string $token = '' ): array {
 		$cabecalhos = array( 'Cache-Control' => 'no-cache' );
@@ -793,6 +883,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			return array(
 				'status' => 0,
 				'cab'    => array(),
+				'corpo'  => '',
 			);
 		}
 
@@ -806,6 +897,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 		return array(
 			'status' => (int) wp_remote_retrieve_response_code( $resposta ),
 			'cab'    => $cab,
+			'corpo'  => (string) wp_remote_retrieve_body( $resposta ),
 		);
 	}
 
@@ -943,6 +1035,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 		}
 		$limpo = consulta_leve_htaccess_sem_bloco( (string) $original );
 		$novo  = consulta_leve_htaccess_com_bloco( (string) $original, $config );
+		$bloco = consulta_leve_htaccess_bloco( $config, consulta_leve_htaccess_analisar( $limpo['conteudo'] )['eol'] );
 		if ( '' !== $novo['motivo'] ) {
 			return $novo['motivo'];
 		}
@@ -961,6 +1054,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 				'cobertos' => array_keys( consulta_leve_cabecalhos_lista( $config, true, array() ) ),
 				'token'    => $token,
 				'sha_novo' => '',
+				'ensaio'   => 'consulta-leve-ensaio-' . bin2hex( random_bytes( 16 ) ),
 			)
 		);
 
@@ -969,13 +1063,20 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			return 'copia';
 		}
 
-		// Bloco antigo sai primeiro: a base tem de ser a resposta sem nós.
+		// Bloco antigo nosso, se houver, sai primeiro: ensaio e base são sem nós.
 		if ( null !== $original && $limpo['conteudo'] !== $original ) {
 			$motivo = consulta_leve_htaccess_escrever( $arquivo, $original, $limpo['conteudo'] );
 			if ( '' !== $motivo ) {
 				return $motivo;
 			}
 			$original = $limpo['conteudo'];
+		}
+
+		// Ensaio numa pasta à parte: se o servidor não aceita as linhas, o site nem percebe.
+		$motivo = consulta_leve_htaccess_ensaiar( $estado['ensaio'], $bloco, $config );
+		$estado = consulta_leve_htaccess_gravar_estado( consulta_leve_htaccess_limpar( $estado ) );
+		if ( '' !== $motivo || '' !== $estado['ensaio'] ) {
+			return '' !== $motivo ? $motivo : 'ensaio_sobra';
 		}
 
 		$antes  = consulta_leve_htaccess_base( $token );
@@ -1042,11 +1143,12 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			return $motivo;
 		}
 
+		$limpeza = consulta_leve_htaccess_limpar( $estado );
 		if ( '' !== consulta_leve_htaccess_desfazer( $estado ) ) {
-			consulta_leve_htaccess_gravar_estado( array( 'motivo' => 'volta_falhou' ) );
+			consulta_leve_htaccess_gravar_estado( $limpeza + array( 'motivo' => 'volta_falhou' ) );
 			return 'volta_falhou';
 		}
-		consulta_leve_htaccess_gravar_estado( array( 'estado' => 'recusado', 'motivo' => $motivo ) );
+		consulta_leve_htaccess_gravar_estado( $limpeza + array( 'estado' => 'recusado', 'motivo' => $motivo ) );
 
 		return $motivo;
 	}
@@ -1054,7 +1156,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	/**
 	 * Tira só o bloco próprio.
 	 *
-	 * @param string $operacao desligar, salvar ou desativar (vai para o registro).
+	 * @param string $operacao desligar, salvar, desativar ou desinstalar (vai para o registro).
 	 * @param string $final    Motivo a mostrar ('' = desligado por escolha).
 	 * @return string ok ou motivo (o bloco ficou).
 	 */
@@ -1070,7 +1172,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 			return 'ocupado';
 		}
 		try {
-			$motivo = consulta_leve_htaccess_remover_bloco( $estado );
+			$motivo = consulta_leve_htaccess_tirar( $estado );
 		} catch ( \Throwable $erro ) {
 			$motivo = 'erro';
 			do_action( 'consulta_leve_falha', 'htaccess', $erro );
@@ -1080,7 +1182,7 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 
 		if ( '' === $motivo ) {
 			consulta_leve_htaccess_gravar_estado(
-				array(
+				consulta_leve_htaccess_limpar( $estado ) + array(
 					'estado' => '' === $final ? 'desligado' : 'recusado',
 					'motivo' => $final,
 				)
@@ -1092,40 +1194,6 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 		consulta_leve_registrar( 'htaccess', $operacao, '' === $motivo ? 'ok' : $motivo );
 
 		return '' === $motivo ? 'ok' : $motivo;
-	}
-
-	/**
-	 * Miolo da remoção, com a trava na mão.
-	 *
-	 * @param array $estado Estado do bloco.
-	 * @return string '' ou motivo.
-	 */
-	function consulta_leve_htaccess_remover_bloco( array $estado ): string {
-		$arquivo = $estado['arquivo'];
-		$atual   = consulta_leve_htaccess_caminho_ok( $arquivo ) ? consulta_leve_htaccess_ler( $arquivo ) : false;
-		if ( null === $atual ) {
-			return '';
-		}
-		// Só lê: sem bloco nosso, nada a fazer, mesmo sem permissão de escrita.
-		if ( is_string( $atual ) && false === stripos( $atual, 'Consulta Leve' ) ) {
-			return '';
-		}
-		$motivo = consulta_leve_htaccess_recusa( consulta_leve_htaccess_fatos( $arquivo, array() ), 'remover' );
-		if ( '' !== $motivo ) {
-			return $motivo;
-		}
-		if ( false === $atual ) {
-			return 'sem_leitura';
-		}
-		$limpo = consulta_leve_htaccess_sem_bloco( $atual );
-		if ( '' !== $limpo['motivo'] || $limpo['conteudo'] === $atual ) {
-			return $limpo['motivo'];
-		}
-		if ( '' === $limpo['conteudo'] && ! $estado['existia'] ) {
-			return @unlink( $arquivo ) ? '' : 'sem_escrita'; // phpcs:ignore WordPress.WP.AlternativeFunctions,WordPress.PHP.NoSilencedErrors.Discouraged -- arquivo criado por este plugin e vazio sem o bloco.
-		}
-
-		return consulta_leve_htaccess_escrever( $arquivo, $atual, $limpo['conteudo'] );
 	}
 
 	/**
@@ -1154,6 +1222,40 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 		}
 
 		return $motivo;
+	}
+
+	/**
+	 * Desativar ou desinstalar: tira o bloco, insistindo um pouco se outra
+	 * requisição estiver com a trava.
+	 *
+	 * @param string $operacao desativar ou desinstalar.
+	 * @param int    $espera_ms Espera entre as tentativas.
+	 * @return string ok ou motivo (o bloco ficou no arquivo).
+	 */
+	function consulta_leve_htaccess_sair( string $operacao, int $espera_ms = 300 ): string {
+		if ( 'desligado' === consulta_leve_htaccess_estado()['estado'] ) {
+			return 'ok';
+		}
+		for ( $i = 0; $i < 10; $i++ ) {
+			$motivo = consulta_leve_htaccess_remover( $operacao );
+			if ( 'ocupado' !== $motivo ) {
+				return $motivo;
+			}
+			usleep( $espera_ms * 1000 );
+		}
+		consulta_leve_registrar( 'htaccess', $operacao, $motivo );
+
+		return $motivo;
+	}
+
+	/**
+	 * Aviso de bloco que ficou (já escapado).
+	 *
+	 * @param string $motivo Motivo.
+	 * @return string
+	 */
+	function consulta_leve_htaccess_aviso_ficou( string $motivo ): string {
+		return '<p>' . esc_html__( 'A Consulta Leve foi desativada, mas o bloco dela continua no .htaccess. Motivo:', 'consulta-leve' ) . ' ' . esc_html( consulta_leve_htaccess_motivos()[ $motivo ] ?? $motivo ) . '.</p><p>' . esc_html__( 'Tire à mão, por FTP ou SSH, as linhas de # BEGIN Consulta Leve até # END Consulta Leve. Enquanto ficarem, o servidor segue enviando os cabeçalhos.', 'consulta-leve' ) . '</p>';
 	}
 
 	/**
@@ -1197,10 +1299,17 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 	 */
 	function consulta_leve_htaccess_revisar( bool $forcar = false ): void {
 		$config = consulta_leve_config_sanitizar( get_option( CONSULTA_LEVE_OPCAO_CONFIG, array() ) );
+		$estado = $forcar || $config['cab_htaccess'] ? consulta_leve_htaccess_estado() : array( 'estado' => '' );
+		if ( 'pendente' !== $estado['estado'] && '' !== ( $estado['ensaio'] ?? '' ) ) {
+			// Pasta de ensaio que não saiu na hora: tenta de novo.
+			$limpeza = consulta_leve_htaccess_limpar( $estado );
+			if ( $limpeza['ensaio'] !== $estado['ensaio'] ) {
+				$estado = consulta_leve_htaccess_gravar_estado( $limpeza + array( 'em' => $estado['em'] ) );
+			}
+		}
 		if ( ! $config['cab_htaccess'] ) {
 			return;
 		}
-		$estado = consulta_leve_htaccess_estado();
 		if ( 'ativo' !== $estado['estado'] || ( ! $forcar && time() - $estado['visto'] < CONSULTA_LEVE_HTACCESS_REVISAO_S ) ) {
 			return;
 		}
@@ -1284,8 +1393,35 @@ if ( ! function_exists( 'consulta_leve_htaccess_bloco' ) ) {
 				CONSULTA_LEVE_ARQUIVO,
 				static function () {
 					try {
-						if ( 'desligado' !== consulta_leve_htaccess_estado()['estado'] ) {
-							consulta_leve_htaccess_remover( 'desativar' );
+						$motivo = consulta_leve_htaccess_sair( 'desativar' );
+						if ( 'ok' === $motivo ) {
+							return;
+						}
+						if ( defined( 'WP_CLI' ) && WP_CLI && is_callable( array( 'WP_CLI', 'warning' ) ) ) {
+							\WP_CLI::warning( wp_strip_all_tags( consulta_leve_htaccess_aviso_ficou( $motivo ) ) );
+							return;
+						}
+						if ( is_admin() && ! wp_doing_ajax() ) {
+							// Depois de desativar, este código não carrega mais: o aviso sai no
+							// redirecionamento de volta à tela Plugins, com a desativação já gravada.
+							add_filter(
+								'wp_redirect',
+								static function ( $destino ) use ( $motivo ) {
+									if ( is_string( $destino ) && false !== strpos( $destino, 'plugins.php' ) ) {
+										wp_die(
+											consulta_leve_htaccess_aviso_ficou( $motivo ), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escapado na função.
+											'',
+											array(
+												'response'  => 200,
+												'link_url'  => esc_url( admin_url( 'plugins.php' ) ),
+												'link_text' => esc_html__( 'Voltar aos plugins', 'consulta-leve' ),
+											)
+										);
+									}
+									return $destino;
+								},
+								999
+							);
 						}
 					} catch ( \Throwable $erro ) {
 						do_action( 'consulta_leve_falha', 'htaccess', $erro );

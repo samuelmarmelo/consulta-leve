@@ -18,7 +18,7 @@ Versões: [SemVer](https://semver.org/lang/pt-BR/).
   presente nunca é trocado; o tema dispensa com `cabecalhos`.
 - Os mesmos cabeçalhos também no `.htaccess` (`cab_htaccess`), opcional e
   desligado por padrão, em Apache ou LiteSpeed: bloco próprio de lista
-  fechada, cópia, conferência por pedidos ao próprio site, volta automática e
+  fechada, ensaio em pasta à parte, cópia, conferência por pedidos ao próprio site, volta automática e
   retomada de escrita interrompida. Estado no painel e no diagnóstico.
 
 ### Alterado
