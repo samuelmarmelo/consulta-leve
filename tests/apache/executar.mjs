@@ -345,6 +345,42 @@ async function cenario(id, nome, fn, { conteudo = ORIGINAL, apacheConf = {}, arq
 }
 
 async function todos() {
+  // Controle negativo, sem o plugin escrever: as armadilhas quebram mesmo e o
+  // teste enxerga repetição. Confere também as duas tabelas do mod_headers.
+  await cenario('0', 'as armadilhas dos cenários funcionam', async (antes) => {
+    const linha = (tabela) => Buffer.concat([Buffer.from(`Header ${tabela} set X-Frame-Options "SAMEORIGIN"
+`), antes]);
+    const vezes = async (tabela) => {
+      escrever(linha(tabela));
+      return ((await home()).cab['x-frame-options'] || []).length;
+    };
+    const [sempre, sucesso] = [await vezes('always'), await vezes('onsuccess')];
+    ok(variante === 'fpm' ? sempre === 1 && sucesso === 2 : sempre === 2 && sucesso === 1, `cabeçalho do PHP mais o do servidor: always ${sempre} vez(es), onsuccess ${sucesso} vez(es)`);
+
+    const bloco = Buffer.from('# BEGIN Consulta Leve
+<IfModule mod_headers.c>
+Header set X-Content-Type-Options "nosniff"
+</IfModule>
+# END Consulta Leve
+');
+    const comBloco = Buffer.concat([bloco, antes]);
+    escrever(comBloco);
+    const visto = await gif();
+    ok(visto.status === 200 && visto.cab['x-content-type-options']?.length === 1, 'com tudo ligado, o estático recebe o cabeçalho');
+    for (const [rotulo, opcoes, status] of [['sem mod_headers', { headers: false }, 200], ['AllowOverride None', { override: 'None' }, 200], ['AllowOverride sem FileInfo', { override: 'Indexes' }, 500]]) {
+      await configurar(opcoes);
+      escrever(status === 500 ? bloco : comBloco);
+      const r = await gif();
+      ok(r.status === status && !(r.status === 200 && r.cab['x-content-type-options']), `${rotulo}: estático ${r.status}, ${r.cab['x-content-type-options'] ? 'com' : 'sem'} cabeçalho`);
+    }
+    await configurar();
+    mu('erro-com-bloco');
+    escrever(comBloco);
+    const quebrada = await home();
+    escrever(antes);
+    ok(quebrada.status === 500 && (await home()).status === 200, `página inicial ${quebrada.status} com o bloco e 200 sem ele`);
+  });
+
   await cenario('1', 'caminho feliz pelo formulário', async () => {
     const r = await ligar();
     ok(r.status === 302 && r.aviso === 'htaccess_ligado', `admin-post: ${r.status} ${r.aviso}`);
